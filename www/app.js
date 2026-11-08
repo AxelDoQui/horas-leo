@@ -20,6 +20,7 @@ const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => (
 const num = (n) => n.toFixed(2).replace('.', ',');
 const horas = (n) => `${num(n)} h`;
 const euros = (n) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
+const resta = (n) => (n > 0 ? `−${euros(n)}` : euros(0));
 const dos = (n) => String(n).padStart(2, '0');
 const hoyISO = () => `${hoy.getFullYear()}-${dos(hoy.getMonth() + 1)}-${dos(hoy.getDate())}`;
 
@@ -103,8 +104,8 @@ function vistaMes(el) {
         <tr><td>Horas extra</td><td>${euros(est.extra)}</td></tr>
         <tr><td>Nocturnidad</td><td>${euros(est.nocturnidad)}</td></tr>
         <tr class="total"><td>Bruto</td><td>${euros(est.bruto)}</td></tr>
-        <tr><td>Descuentos</td><td>−${euros(est.descuentos)}</td></tr>
-        <tr><td>IRPF</td><td>−${euros(est.irpf)}</td></tr>
+        <tr><td>Descuentos</td><td>${resta(est.descuentos)}</td></tr>
+        <tr><td>IRPF</td><td>${resta(est.irpf)}</td></tr>
         <tr class="total"><td>Líquido aprox.</td><td>${euros(est.liquido)}</td></tr>
       </table>
       ${avisoPrecio}

@@ -45,7 +45,8 @@ main { padding: 0 16px; max-width: 640px; margin: 0 auto; }
 }
 .tarjeta h2 { margin: 0 0 8px; font-size: 1rem; }
 .cabecera { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.cabecera b { text-transform: capitalize; }
+.cabecera b { display: inline-block; }
+.cabecera b::first-letter { text-transform: uppercase; }
 button { font: inherit; color: inherit; }
 .icono, .pestana, .primario, .secundario, .peligro {
   border: 1px solid var(--borde); background: var(--tarjeta);
