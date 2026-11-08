@@ -35,7 +35,7 @@ Las horas se guardan como fecha-hora completas. Si la salida es anterior a la en
 se entiende que cruza la medianoche y cae al día siguiente.
 
 **Ajustes:** precio por hora de la base, precio por hora extra (9,54), precio por hora
-nocturna (0,48), porcentaje de descuentos (6,50), IRPF (0), historial de jornada semanal (fecha y horas: 20 h desde el 02/10/2026, 25 h desde el 19/10/2026), límite anual de horas (896).
+nocturna (0,48), porcentaje de descuentos (6,50), IRPF (0), historial de jornada semanal (fecha y horas: 20 h desde el 02/10/2026, 25 h desde el 19/10/2026), límite anual de horas (1.120: las 896 h del contrato original de 20 h/semana × 25/20, decidido el 2026-11-08).
 
 ## Cálculo (por turno)
 
@@ -73,7 +73,7 @@ precios del mes difieren, así que el resultado es aproximado y así se le dice 
    Se puede cambiar de mes y ver por quincena.
 2. **Añadir/editar turno:** fecha y las cuatro horas, con aviso si los datos no cuadran.
 3. **Ajustes:** precios y descuentos, ya rellenados con los de octubre.
-4. **Contador anual:** horas hechas frente al límite de 896 h.
+4. **Contador anual:** horas hechas frente al límite anual (1.120 h).
 
 ## Estructura
 

@@ -52,7 +52,7 @@ test('cargarAjustes devuelve los de por defecto y guarda los cambios', () => {
   assert.deepEqual(a.cargarAjustes(), AJUSTES_POR_DEFECTO);
   a.guardarAjustes({ ...AJUSTES_POR_DEFECTO, precioBase: 10.5 });
   assert.equal(a.cargarAjustes().precioBase, 10.5);
-  assert.equal(a.cargarAjustes().limiteAnual, 896);
+  assert.equal(a.cargarAjustes().limiteAnual, 1120);
 });
 
 test('exportar e importar en otro almacén conserva turnos y ajustes', () => {

@@ -11,7 +11,8 @@ export const AJUSTES_POR_DEFECTO = {
   precioNocturna: 0.48,
   descuentosPct: 6.5,
   irpfPct: 0,
-  limiteAnual: 896,
+  // 896 h/año era el contrato de 20 h/semana; con 25 h/semana (desde el 19/10/2026) son 1.120 h.
+  limiteAnual: 1120,
   // Horas semanales ordinarias: 20 h desde el inicio del contrato (02/10/2026) y 25 h desde
   // el 19/10/2026 (variación de jornada firmada el 16/10/2026). Lo que pasa del tope es extra.
   jornadas: [
