@@ -35,20 +35,28 @@ Las horas se guardan como fecha-hora completas. Si la salida es anterior a la en
 se entiende que cruza la medianoche y cae al día siguiente.
 
 **Ajustes:** precio por hora de la base, precio por hora extra (9,54), precio por hora
-nocturna (0,48), porcentaje de descuentos (6,50), IRPF (0), límite anual de horas (896).
+nocturna (0,48), porcentaje de descuentos (6,50), IRPF (0), historial de jornada semanal (fecha y horas: 20 h desde el 02/10/2026, 25 h desde el 19/10/2026), límite anual de horas (896).
 
 ## Cálculo (por turno)
 
 - **Horas asignadas** = salida asignada − entrada asignada.
-- **Horas extra** = horas reales trabajadas fuera del tramo asignado
-  (antes de la entrada asignada y después de la salida asignada).
-  Si trabaja menos de lo asignado no hay extra; se muestra la diferencia en negativo.
+- **Horas trabajadas** = salida real − entrada real. Si trabaja menos de lo asignado
+  se muestra la diferencia en negativo.
+- **Horas extra (complementarias)** = horas trabajadas de la semana (lunes a domingo)
+  por encima del tope semanal, estén o no dentro del turno asignado. El tope es la jornada
+  vigente el lunes de esa semana: **20 h hasta el 18/10/2026 y 25 h desde el 19/10/2026**
+  (variación de jornada firmada el 16/10/2026), editable como lista de cambios en Ajustes.
+  *(Decidido el 2026-11-08: el turno asignado ya no define las extra, solo sirve para comparar.)*
+  Se calcula con todos los turnos de la semana aunque cruce de mes, y en el turno que
+  cruza el tope solo cuenta como extra la parte que lo pasa.
+- **Horas ordinarias** = horas trabajadas − horas extra.
 - **Horas nocturnas** = horas reales entre las 22:00 y las 07:00,
   contando bien los turnos que cruzan la medianoche.
 
 ## Estimación de nómina (por periodo)
 
-- Base = horas asignadas × precio por hora de la base (editable en Ajustes).
+- Base = horas ordinarias × precio por hora de la base (editable en Ajustes).
+  Se usan las ordinarias y no las asignadas para no pagar dos veces una hora dentro del tope.
   Por defecto 9,54 €/h, el mismo precio que la nómina da a las horas complementarias
   (por ley se pagan igual que las ordinarias). Es un supuesto, no un dato de la nómina.
 - Extra = horas extra × 9,54 €.

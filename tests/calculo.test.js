@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  intervalo, calcularTurno, horasNocturnas,
+  intervalo, calcularTurno, horasNocturnas, detallarTurnos,
+  sumarDias, semanaDe, rejillaMes, topeDeFecha, validarJornadas,
   estimarNomina, periodosDelMes, filtrarPeriodo, horasDelAnio, validarTurno,
 } from '../www/calculo.js';
 
 const turno = (ae, as, re, rs, fecha = '2026-10-05') => ({
   fecha, asignadoEntrada: ae, asignadoSalida: as, realEntrada: re, realSalida: rs,
 });
+// Turno de 8 h cumplido tal cual, en la fecha dada.
+const ocho = (fecha) => turno('10:00', '18:00', '10:00', '18:00', fecha);
 
 test('intervalo: turno normal dura lo que dice', () => {
   const iv = intervalo('2026-10-05', '16:00', '20:00');
@@ -19,31 +22,20 @@ test('intervalo: si la salida es anterior cruza la medianoche', () => {
   assert.equal(iv.fin - iv.ini, 8 * 3600000);
 });
 
-test('turno cumplido tal cual: sin extra ni diferencia', () => {
+test('turno cumplido tal cual: sin diferencia ni nocturnas', () => {
   const c = calcularTurno(turno('16:00', '20:00', '16:00', '20:00'));
-  assert.deepEqual(c, { asignadas: 4, trabajadas: 4, extra: 0, nocturnas: 0, diferencia: 0 });
+  assert.deepEqual(c, { asignadas: 4, trabajadas: 4, nocturnas: 0, diferencia: 0 });
 });
 
-test('se queda 1,5 h después de la salida asignada: 1,5 h extra', () => {
+test('se queda 1,5 h más de lo asignado: trabaja 5,5 h y la diferencia es +1,5', () => {
   const c = calcularTurno(turno('16:00', '20:00', '16:00', '21:30'));
-  assert.equal(c.extra, 1.5);
+  assert.equal(c.trabajadas, 5.5);
   assert.equal(c.diferencia, 1.5);
 });
 
-test('entra 30 min antes de lo asignado: 0,5 h extra', () => {
-  const c = calcularTurno(turno('16:00', '20:00', '15:30', '20:00'));
-  assert.equal(c.extra, 0.5);
-});
-
-test('extra por los dos lados: 15-21 con turno 16-20 son 2 h extra', () => {
-  const c = calcularTurno(turno('16:00', '20:00', '15:00', '21:00'));
-  assert.equal(c.extra, 2);
-  assert.equal(c.trabajadas, 6);
-});
-
-test('trabaja menos de lo asignado: no hay extra y la diferencia es negativa', () => {
+test('trabaja menos de lo asignado: la diferencia es negativa', () => {
   const c = calcularTurno(turno('16:00', '20:00', '17:00', '19:00'));
-  assert.equal(c.extra, 0);
+  assert.equal(c.trabajadas, 2);
   assert.equal(c.diferencia, -2);
 });
 
@@ -51,12 +43,11 @@ test('turno de noche 22:00-06:00: 8 h, todas nocturnas', () => {
   const c = calcularTurno(turno('22:00', '06:00', '22:00', '06:00'));
   assert.equal(c.asignadas, 8);
   assert.equal(c.nocturnas, 8);
-  assert.equal(c.extra, 0);
 });
 
-test('noche con extra: real 21:00-06:30 sobre 22:00-06:00 → 1,5 extra y 8,5 nocturnas', () => {
+test('noche con más horas: real 21:00-06:30 → 9,5 trabajadas y 8,5 nocturnas', () => {
   const c = calcularTurno(turno('22:00', '06:00', '21:00', '06:30'));
-  assert.equal(c.extra, 1.5);
+  assert.equal(c.trabajadas, 9.5);
   assert.equal(c.nocturnas, 8.5);
 });
 
@@ -75,19 +66,143 @@ test('nocturnas: turno de tarde 14:00-22:00 no tiene ninguna', () => {
   assert.equal(horasNocturnas(iv), 0);
 });
 
+// ---- Tope semanal (lunes a domingo) ----
+// 2026-10-05 es lunes.
+
+test('detallarTurnos: dentro del tope no hay extra', () => {
+  const ts = [ocho('2026-10-05'), ocho('2026-10-06'), ocho('2026-10-07')]; // 24 h
+  const d = detallarTurnos(ts, 25);
+  for (const t of ts) {
+    assert.equal(d.get(t).extra, 0);
+    assert.equal(d.get(t).ordinarias, 8);
+  }
+});
+
+test('detallarTurnos: el turno que cruza el tope cuenta como extra solo lo que pasa', () => {
+  const ts = [ocho('2026-10-05'), ocho('2026-10-06'), ocho('2026-10-07'), ocho('2026-10-08')];
+  const d = detallarTurnos(ts, 25); // acumulado 8, 16, 24, 32 → el jueves pasa 7 h
+  assert.equal(d.get(ts[2]).extra, 0);
+  assert.equal(d.get(ts[3]).extra, 7);
+  assert.equal(d.get(ts[3]).ordinarias, 1);
+});
+
+test('detallarTurnos: lo posterior al tope es todo extra, aunque esté dentro del turno asignado', () => {
+  const ts = [ocho('2026-10-05'), ocho('2026-10-06'), ocho('2026-10-07'), ocho('2026-10-08'), ocho('2026-10-09')];
+  const d = detallarTurnos(ts, 25);
+  assert.equal(d.get(ts[4]).extra, 8);
+  assert.equal(d.get(ts[4]).ordinarias, 0);
+});
+
+test('detallarTurnos: el domingo cuenta en la semana que acaba y el lunes empieza otra', () => {
+  const ts = [
+    ocho('2026-10-05'), ocho('2026-10-06'), ocho('2026-10-07'), ocho('2026-10-08'),
+    turno('10:00', '14:00', '10:00', '14:00', '2026-10-11'), // domingo, 4 h → acumulado 36
+    ocho('2026-10-12'),                                     // lunes siguiente: semana nueva
+  ];
+  const d = detallarTurnos(ts, 25);
+  assert.equal(d.get(ts[4]).extra, 4);
+  assert.equal(d.get(ts[5]).extra, 0);
+});
+
+test('detallarTurnos: no depende del orden en que vengan los turnos', () => {
+  const ts = [ocho('2026-10-05'), ocho('2026-10-06'), ocho('2026-10-07'), ocho('2026-10-08')];
+  const d = detallarTurnos(ts.slice().reverse(), 25);
+  assert.equal(d.get(ts[3]).extra, 7);
+  assert.equal(d.get(ts[0]).extra, 0);
+});
+
+test('detallarTurnos: una semana que cruza de mes se cuenta entera', () => {
+  // Lunes 28/09 a jueves 01/10: 8 h cada día.
+  const ts = [ocho('2026-09-28'), ocho('2026-09-29'), ocho('2026-09-30'), ocho('2026-10-01')];
+  const d = detallarTurnos(ts, 25);
+  assert.equal(d.get(ts[3]).extra, 7);
+});
+
+// ---- Fechas, semana y calendario ----
+
+test('sumarDias: cruza mes y año', () => {
+  assert.equal(sumarDias('2026-10-31', 1), '2026-11-01');
+  assert.equal(sumarDias('2026-12-31', 1), '2027-01-01');
+  assert.equal(sumarDias('2026-10-05', -7), '2026-09-28');
+});
+
+test('semanaDe: de lunes a domingo, también si la fecha es domingo', () => {
+  const sem = { desde: '2026-10-05', hasta: '2026-10-11' };
+  assert.deepEqual(semanaDe('2026-10-05'), sem); // lunes
+  assert.deepEqual(semanaDe('2026-10-08'), sem); // jueves
+  assert.deepEqual(semanaDe('2026-10-11'), sem); // domingo
+  assert.deepEqual(semanaDe('2026-10-12'), { desde: '2026-10-12', hasta: '2026-10-18' });
+});
+
+test('rejillaMes: octubre de 2026 empieza en jueves y rellena hasta completar semanas', () => {
+  const c = rejillaMes(2026, 10);
+  assert.equal(c.length % 7, 0);
+  assert.equal(c.length, 35);
+  assert.deepEqual(c.slice(0, 3), [null, null, null]);
+  assert.equal(c[3], '2026-10-01');
+  assert.equal(c[33], '2026-10-31');
+  assert.equal(c[34], null);
+});
+
+test('rejillaMes: un mes que empieza en lunes no tiene huecos delante', () => {
+  const c = rejillaMes(2026, 6); // 1 de junio de 2026 es lunes
+  assert.equal(c[0], '2026-06-01');
+});
+
+// ---- Cambio de jornada (20 h hasta el 18/10/2026, 25 h desde el 19/10/2026) ----
+
+const JORNADAS = [
+  { desde: '2026-10-02', horas: 20 },
+  { desde: '2026-10-19', horas: 25 },
+];
+
+test('topeDeFecha: usa la jornada vigente en la fecha', () => {
+  assert.equal(topeDeFecha('2026-10-18', JORNADAS), 20);
+  assert.equal(topeDeFecha('2026-10-19', JORNADAS), 25);
+  assert.equal(topeDeFecha('2026-11-30', JORNADAS), 25);
+  assert.equal(topeDeFecha('2026-09-01', JORNADAS), 20); // antes del primero: vale el primero
+  assert.equal(topeDeFecha('2026-10-19', 30), 30);       // número fijo
+});
+
+test('detallarTurnos: la semana del 12 al 18 de octubre usa 20 h y la del 19 al 25 usa 25 h', () => {
+  const sem1 = [ocho('2026-10-12'), ocho('2026-10-13'), ocho('2026-10-14')]; // 24 h con tope 20
+  const sem2 = [ocho('2026-10-19'), ocho('2026-10-20'), ocho('2026-10-21')]; // 24 h con tope 25
+  const d = detallarTurnos([...sem1, ...sem2], JORNADAS);
+  assert.equal(d.get(sem1[2]).extra, 4);
+  assert.equal(d.get(sem2[2]).extra, 0);
+});
+
+test('estimarNomina usa la lista de jornadas de los ajustes', () => {
+  const ts = [ocho('2026-10-12'), ocho('2026-10-13'), ocho('2026-10-14')];
+  const e = estimarNomina(ts, { ...AJ, jornadas: JORNADAS });
+  assert.equal(e.horasExtra, 4);
+  assert.equal(e.horasOrdinarias, 20);
+});
+
+test('validarJornadas: acepta una lista correcta y rechaza las malas', () => {
+  assert.equal(validarJornadas(JORNADAS), '');
+  assert.match(validarJornadas([]), /al menos una/);
+  assert.match(validarJornadas([{ desde: '', horas: 20 }]), /fecha/);
+  assert.match(validarJornadas([{ desde: '2026-10-02', horas: 0 }]), /más de 0/);
+  assert.match(validarJornadas([{ desde: '2026-10-02', horas: 20 }, { desde: '2026-10-02', horas: 25 }]), /misma fecha/);
+});
+
+// ---- Nómina ----
+
 const AJ = {
   precioBase: 9.54, precioExtra: 9.54, precioNocturna: 0.48,
-  descuentosPct: 6.5, irpfPct: 0, limiteAnual: 896,
+  descuentosPct: 6.5, irpfPct: 0, limiteAnual: 896, topeSemanal: 25,
 };
 
-test('estimarNomina: 4 h asignadas, 3 h extra y 1 h nocturna', () => {
-  // Real 16:00-23:00 sobre 16:00-20:00 → 3 h extra y 1 h entre 22:00 y 23:00.
+test('estimarNomina: 7 h trabajadas con 1 h nocturna, dentro del tope', () => {
+  // Real 16:00-23:00: 7 h, 1 h entre 22:00 y 23:00. Con tope 25 no hay extra.
   const e = estimarNomina([turno('16:00', '20:00', '16:00', '23:00')], AJ);
   assert.equal(e.horasAsignadas, 4);
-  assert.equal(e.horasExtra, 3);
+  assert.equal(e.horasOrdinarias, 7);
+  assert.equal(e.horasExtra, 0);
   assert.equal(e.horasNocturnas, 1);
-  assert.equal(e.base, 38.16);        // 4 × 9,54
-  assert.equal(e.extra, 28.62);       // 3 × 9,54
+  assert.equal(e.base, 66.78);        // 7 × 9,54
+  assert.equal(e.extra, 0);
   assert.equal(e.nocturnidad, 0.48);  // 1 × 0,48
   assert.equal(e.bruto, 67.26);
   assert.equal(e.descuentos, 4.37);   // 6,5 % de 67,26 = 4,3719
@@ -95,11 +210,23 @@ test('estimarNomina: 4 h asignadas, 3 h extra y 1 h nocturna', () => {
   assert.equal(e.liquido, 62.89);
 });
 
-test('estimarNomina: nocturnidad como en la nómina, 5,95 h × 0,48 = 2,86', () => {
-  // La nómina de octubre muestra 2,84 porque redondea el precio; aquí es la cuenta exacta.
-  const e = estimarNomina([], { ...AJ });
-  assert.equal(e.bruto, 0);
-  assert.equal(Math.round(5.95 * 0.48 * 100) / 100, 2.86);
+test('estimarNomina: con tope de 5 h, 2 de las 7 h son extra', () => {
+  const e = estimarNomina([turno('16:00', '20:00', '16:00', '23:00')], { ...AJ, topeSemanal: 5 });
+  assert.equal(e.horasOrdinarias, 5);
+  assert.equal(e.horasExtra, 2);
+  assert.equal(e.base, 47.7);   // 5 × 9,54
+  assert.equal(e.extra, 19.08); // 2 × 9,54
+  assert.equal(e.bruto, 67.26);
+});
+
+test('estimarNomina: la semana se cuenta con todos los turnos, no solo los del periodo', () => {
+  // Semana lun 28/09 a jue 01/10. El periodo del mes de octubre solo incluye el jueves,
+  // pero las 24 h anteriores ya gastaron el tope: ese día son 7 h extra.
+  const todos = [ocho('2026-09-28'), ocho('2026-09-29'), ocho('2026-09-30'), ocho('2026-10-01')];
+  const periodo = filtrarPeriodo(todos, '2026-10-01', '2026-10-31');
+  const e = estimarNomina(periodo, AJ, todos);
+  assert.equal(e.horasExtra, 7);
+  assert.equal(e.horasOrdinarias, 1);
 });
 
 test('estimarNomina: sin turnos todo es cero', () => {

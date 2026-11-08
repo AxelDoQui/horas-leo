@@ -1,16 +1,26 @@
 import {
-  calcularTurno, estimarNomina, filtrarPeriodo, periodosDelMes, horasDelAnio, validarTurno,
+  calcularTurno, detallarTurnos, estimarNomina, filtrarPeriodo, periodosDelMes, horasDelAnio,
+  validarTurno, semanaDe, sumarDias, rejillaMes, topeDeFecha, validarJornadas,
 } from './calculo.js';
 import { crearAlmacen } from './almacen.js';
 
 const almacen = crearAlmacen(window.localStorage);
-const hoy = new Date();
+const ahora = new Date();
+const dos = (n) => String(n).padStart(2, '0');
+const hoyISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`;
+};
+
 const estado = {
-  vista: 'mes',
-  anio: hoy.getFullYear(),
-  mes: hoy.getMonth() + 1,
-  periodo: 'mes', // 'mes' | 'q1' | 'q2'
+  vista: 'calendario', // calendario | semana | mes | turno | anual | ajustes
+  anio: ahora.getFullYear(),
+  mes: ahora.getMonth() + 1,
+  ancla: hoyISO(), // una fecha cualquiera de la semana que se está viendo
+  periodo: 'mes', // 'mes' | 'q1' | 'q2' (solo en la vista Mes)
   editandoId: null,
+  fechaNueva: null, // fecha con la que se abre un turno nuevo
+  volverA: 'calendario', // pantalla a la que se vuelve al cerrar el formulario
 };
 
 const $ = (s) => document.querySelector(s);
@@ -21,16 +31,24 @@ const num = (n) => n.toFixed(2).replace('.', ',');
 const horas = (n) => `${num(n)} h`;
 const euros = (n) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 const resta = (n) => (n > 0 ? `−${euros(n)}` : euros(0));
-const dos = (n) => String(n).padStart(2, '0');
-const hoyISO = () => `${hoy.getFullYear()}-${dos(hoy.getMonth() + 1)}-${dos(hoy.getDate())}`;
+const redondear = (n) => Math.round(n * 100) / 100;
+const fechaUTC = (f) => new Date(`${f}T00:00:00Z`);
+const corto = (f) => fechaUTC(f).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const etiquetaDia = (f) => fechaUTC(f).toLocaleDateString('es-ES',
+  { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+const VISTAS_CON_MAS = ['calendario', 'semana', 'mes'];
 
 function render() {
-  $('#nuevo').hidden = estado.vista !== 'mes';
+  $('#nuevo').hidden = !VISTAS_CON_MAS.includes(estado.vista);
   $('#menu').hidden = estado.vista === 'turno';
   document.querySelectorAll('#menu button').forEach((b) => {
     b.classList.toggle('activo', b.dataset.vista === estado.vista);
   });
-  const vistas = { mes: vistaMes, turno: vistaTurno, anual: vistaAnual, ajustes: vistaAjustes };
+  const vistas = {
+    calendario: vistaCalendario, semana: vistaSemana, mes: vistaMes,
+    turno: vistaTurno, anual: vistaAnual, ajustes: vistaAjustes,
+  };
   vistas[estado.vista]($('#vista'));
   window.scrollTo(0, 0);
 }
@@ -38,10 +56,37 @@ function render() {
 function irA(vista) {
   estado.vista = vista;
   estado.editandoId = null;
+  estado.fechaNueva = null;
   render();
 }
 
-// ---------- Mes ----------
+// Abre el formulario de turno (nuevo con una fecha, o uno existente) y recuerda de dónde viene.
+function abrirTurno({ id = null, fecha = null } = {}) {
+  estado.volverA = VISTAS_CON_MAS.includes(estado.vista) ? estado.vista : 'calendario';
+  estado.editandoId = id;
+  estado.fechaNueva = fecha;
+  estado.vista = 'turno';
+  render();
+}
+
+function datos() {
+  const todos = almacen.listarTurnos();
+  const ajustes = almacen.cargarAjustes();
+  return { todos, ajustes, detalle: detallarTurnos(todos, ajustes.jornadas) };
+}
+
+function cabeceraNav(idAnt, texto, idSig, textoAnt, textoSig) {
+  return `<div class="cabecera">
+    <button class="icono" id="${idAnt}" aria-label="${textoAnt}">‹</button>
+    <b>${esc(texto)}</b>
+    <button class="icono" id="${idSig}" aria-label="${textoSig}">›</button>
+  </div>`;
+}
+
+function nombreMes() {
+  return new Date(Date.UTC(estado.anio, estado.mes - 1, 1))
+    .toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
 
 function cambiarMes(delta) {
   estado.mes += delta;
@@ -50,67 +95,172 @@ function cambiarMes(delta) {
   render();
 }
 
-function vistaMes(el) {
-  $('#titulo').textContent = 'Mes';
-  const per = periodosDelMes(estado.anio, estado.mes)[estado.periodo];
-  const turnos = filtrarPeriodo(almacen.listarTurnos(), per.desde, per.hasta);
-  const ajustes = almacen.cargarAjustes();
-  const est = estimarNomina(turnos, ajustes);
-  const nombreMes = new Date(Date.UTC(estado.anio, estado.mes - 1, 1))
-    .toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+// Una fila de turno. `c` es el detalle del turno (con extra y ordinarias).
+function filaTurno(t, c, conFecha = true) {
+  const chips = [];
+  if (c.extra > 0) chips.push(`<span class="chip extra">+${horas(c.extra)} extra</span>`);
+  if (c.diferencia < 0) chips.push(`<span class="chip menos">${horas(c.diferencia)}</span>`);
+  if (c.nocturnas > 0) chips.push(`<span class="chip noche">${horas(c.nocturnas)} noche</span>`);
+  const dia = fechaUTC(t.fecha).toLocaleDateString('es-ES',
+    { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+  return `<li><button class="fila" data-id="${esc(t.id)}">
+    ${conFecha ? `<b>${esc(dia)}</b>` : ''}
+    <span>Asignado ${esc(t.asignadoEntrada)}–${esc(t.asignadoSalida)} · Real ${esc(t.realEntrada)}–${esc(t.realSalida)}</span>
+    <span class="chips">${chips.join('')}</span>
+  </button></li>`;
+}
 
-  const filas = turnos.map((t) => {
-    const c = calcularTurno(t);
-    const chips = [];
-    if (c.extra > 0) chips.push(`<span class="chip extra">+${horas(c.extra)} extra</span>`);
-    if (c.diferencia < 0) chips.push(`<span class="chip menos">${horas(c.diferencia)}</span>`);
-    if (c.nocturnas > 0) chips.push(`<span class="chip noche">${horas(c.nocturnas)} noche</span>`);
-    const dia = new Date(`${t.fecha}T00:00:00Z`).toLocaleDateString('es-ES',
-      { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'UTC' });
-    return `<li><button class="fila" data-id="${esc(t.id)}">
-      <b>${esc(dia)}</b>
-      <span>Asignado ${esc(t.asignadoEntrada)}–${esc(t.asignadoSalida)} · Real ${esc(t.realEntrada)}–${esc(t.realSalida)}</span>
-      <span class="chips">${chips.join('')}</span>
-    </button></li>`;
-  }).join('');
+function enlazarFilas(el) {
+  el.querySelectorAll('.fila').forEach((b) => {
+    b.onclick = () => abrirTurno({ id: b.dataset.id });
+  });
+}
 
+function tarjetaHoras(est) {
+  return `<div class="tarjeta">
+    <h2>Horas</h2>
+    <table class="tabla">
+      <tr><td>Asignadas</td><td>${horas(est.horasAsignadas)}</td></tr>
+      <tr><td>Ordinarias</td><td>${horas(est.horasOrdinarias)}</td></tr>
+      <tr><td>Extra (pasan del tope semanal)</td><td>${horas(est.horasExtra)}</td></tr>
+      <tr><td>Nocturnas</td><td>${horas(est.horasNocturnas)}</td></tr>
+    </table>
+  </div>`;
+}
+
+function tarjetaEstimacion(est, ajustes) {
   const avisoPrecio = ajustes.precioBase === 0
     ? '<p class="aviso">El precio por hora de la base está a 0 en Ajustes: la estimación no cuenta el salario base.</p>'
     : '';
+  return `<div class="tarjeta">
+    <h2>Estimación de nómina</h2>
+    <table class="tabla">
+      <tr><td>Salario base</td><td>${euros(est.base)}</td></tr>
+      <tr><td>Horas extra</td><td>${euros(est.extra)}</td></tr>
+      <tr><td>Nocturnidad</td><td>${euros(est.nocturnidad)}</td></tr>
+      <tr class="total"><td>Bruto</td><td>${euros(est.bruto)}</td></tr>
+      <tr><td>Descuentos</td><td>${resta(est.descuentos)}</td></tr>
+      <tr><td>IRPF</td><td>${resta(est.irpf)}</td></tr>
+      <tr class="total"><td>Líquido aprox.</td><td>${euros(est.liquido)}</td></tr>
+    </table>
+    ${avisoPrecio}
+    <p class="nota">Es una estimación: la nómina real paga el salario base por días y redondea los precios.</p>
+  </div>`;
+}
+
+// ---------- Calendario ----------
+
+function vistaCalendario(el) {
+  $('#titulo').textContent = 'Calendario';
+  const { todos } = datos();
+  const porFecha = new Map();
+  for (const t of todos) porFecha.set(t.fecha, (porFecha.get(t.fecha) || 0) + 1);
+  const hoy = hoyISO();
+  const celdas = rejillaMes(estado.anio, estado.mes);
+
+  let rellenados = 0;
+  let sinRellenar = 0;
+  const casillas = celdas.map((f) => {
+    if (!f) return '<span class="vacio"></span>';
+    const lleno = porFecha.has(f);
+    const falta = !lleno && f <= hoy;
+    if (lleno) rellenados += 1;
+    if (falta) sinRellenar += 1;
+    const clases = ['dia', lleno ? 'lleno' : '', falta ? 'falta' : '', f === hoy ? 'hoy' : ''].join(' ');
+    const marca = lleno ? '✓' : (falta ? '○' : '');
+    const estadoTxt = lleno ? 'rellenado' : (falta ? 'sin rellenar' : '');
+    return `<button class="${clases}" data-f="${f}" aria-label="${esc(etiquetaDia(f))} ${estadoTxt}"><b>${Number(f.slice(8))}</b><i>${marca}</i></button>`;
+  }).join('');
+
+  const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => `<span class="cab">${d}</span>`).join('');
+  el.innerHTML = `
+    ${cabeceraNav('mes-ant', nombreMes(), 'mes-sig', 'Mes anterior', 'Mes siguiente')}
+    <div class="calendario">${cab}${casillas}</div>
+    <p class="leyenda">✓ rellenado · ○ sin rellenar · Rellenados: ${rellenados} · Sin rellenar: ${sinRellenar}</p>
+    <p class="nota">Toca un día para añadir o ver su turno.</p>`;
+
+  el.querySelector('#mes-ant').onclick = () => cambiarMes(-1);
+  el.querySelector('#mes-sig').onclick = () => cambiarMes(1);
+  el.querySelectorAll('.dia').forEach((b) => {
+    b.onclick = () => {
+      const f = b.dataset.f;
+      const delDia = todos.filter((t) => t.fecha === f);
+      if (delDia.length === 0) abrirTurno({ fecha: f });
+      else if (delDia.length === 1) abrirTurno({ id: delDia[0].id });
+      else { estado.ancla = f; irA('semana'); } // varios turnos: se ven en la semana
+    };
+  });
+}
+
+// ---------- Semana ----------
+
+function vistaSemana(el) {
+  $('#titulo').textContent = 'Semana';
+  const { todos, ajustes, detalle } = datos();
+  const sem = semanaDe(estado.ancla);
+  const turnos = filtrarPeriodo(todos, sem.desde, sem.hasta);
+  const est = estimarNomina(turnos, ajustes, todos);
+  const trabajadas = redondear(est.horasOrdinarias + est.horasExtra);
+  const tope = topeDeFecha(sem.desde, ajustes.jornadas);
+  const hoy = hoyISO();
+
+  const dias = [];
+  for (let i = 0; i < 7; i++) {
+    const f = sumarDias(sem.desde, i);
+    const delDia = turnos.filter((t) => t.fecha === f);
+    const filas = delDia.length
+      ? `<ul>${delDia.map((t) => filaTurno(t, detalle.get(t), false)).join('')}</ul>`
+      : '';
+    const falta = !delDia.length && f <= hoy ? '<span class="vacio-txt">○ sin rellenar</span>' : '<span></span>';
+    dias.push(`<div class="dia-semana"><b>${esc(etiquetaDia(f))}</b>${falta}
+      <button class="secundario" data-nuevo="${f}">${delDia.length ? '+ Otro' : '+ Añadir'}</button></div>${filas}`);
+  }
+
+  const pasaDelTope = trabajadas > tope
+    ? `<p class="aviso">Te has pasado ${horas(redondear(trabajadas - tope))} del tope: cuentan como extra.</p>`
+    : '';
+  el.innerHTML = `
+    ${cabeceraNav('sem-ant', `${corto(sem.desde)} – ${corto(sem.hasta)}`, 'sem-sig', 'Semana anterior', 'Semana siguiente')}
+    <div class="tarjeta">
+      <h2>Tope semanal</h2>
+      <progress max="${tope}" value="${Math.min(trabajadas, tope)}"></progress>
+      <table class="tabla">
+        <tr><td>Trabajadas</td><td>${horas(trabajadas)} de ${horas(tope)}</td></tr>
+        <tr><td>Te quedan hasta el tope</td><td>${horas(Math.max(0, redondear(tope - trabajadas)))}</td></tr>
+      </table>
+      ${pasaDelTope}
+    </div>
+    ${tarjetaHoras(est)}
+    ${tarjetaEstimacion(est, ajustes)}
+    ${dias.join('')}`;
+
+  el.querySelector('#sem-ant').onclick = () => { estado.ancla = sumarDias(sem.desde, -7); render(); };
+  el.querySelector('#sem-sig').onclick = () => { estado.ancla = sumarDias(sem.desde, 7); render(); };
+  el.querySelectorAll('[data-nuevo]').forEach((b) => {
+    b.onclick = () => abrirTurno({ fecha: b.dataset.nuevo });
+  });
+  enlazarFilas(el);
+}
+
+// ---------- Mes ----------
+
+function vistaMes(el) {
+  $('#titulo').textContent = 'Mes';
+  const per = periodosDelMes(estado.anio, estado.mes)[estado.periodo];
+  const { todos, ajustes, detalle } = datos();
+  const turnos = filtrarPeriodo(todos, per.desde, per.hasta);
+  const est = estimarNomina(turnos, ajustes, todos);
+  const filas = turnos.map((t) => filaTurno(t, detalle.get(t))).join('');
 
   el.innerHTML = `
-    <div class="cabecera">
-      <button class="icono" id="mes-ant" aria-label="Mes anterior">‹</button>
-      <b>${esc(nombreMes)}</b>
-      <button class="icono" id="mes-sig" aria-label="Mes siguiente">›</button>
-    </div>
+    ${cabeceraNav('mes-ant', nombreMes(), 'mes-sig', 'Mes anterior', 'Mes siguiente')}
     <div class="pestanas" style="margin-top:10px">
       <button class="pestana ${estado.periodo === 'mes' ? 'activo' : ''}" data-p="mes">Mes</button>
       <button class="pestana ${estado.periodo === 'q1' ? 'activo' : ''}" data-p="q1">1–15</button>
       <button class="pestana ${estado.periodo === 'q2' ? 'activo' : ''}" data-p="q2">16–fin</button>
     </div>
-    <div class="tarjeta">
-      <h2>Horas</h2>
-      <table class="tabla">
-        <tr><td>Asignadas</td><td>${horas(est.horasAsignadas)}</td></tr>
-        <tr><td>Extra (complementarias)</td><td>${horas(est.horasExtra)}</td></tr>
-        <tr><td>Nocturnas</td><td>${horas(est.horasNocturnas)}</td></tr>
-      </table>
-    </div>
-    <div class="tarjeta">
-      <h2>Estimación de nómina</h2>
-      <table class="tabla">
-        <tr><td>Salario base</td><td>${euros(est.base)}</td></tr>
-        <tr><td>Horas extra</td><td>${euros(est.extra)}</td></tr>
-        <tr><td>Nocturnidad</td><td>${euros(est.nocturnidad)}</td></tr>
-        <tr class="total"><td>Bruto</td><td>${euros(est.bruto)}</td></tr>
-        <tr><td>Descuentos</td><td>${resta(est.descuentos)}</td></tr>
-        <tr><td>IRPF</td><td>${resta(est.irpf)}</td></tr>
-        <tr class="total"><td>Líquido aprox.</td><td>${euros(est.liquido)}</td></tr>
-      </table>
-      ${avisoPrecio}
-      <p class="nota">Es una estimación: la nómina real paga el salario base por días y redondea los precios.</p>
-    </div>
+    ${tarjetaHoras(est)}
+    ${tarjetaEstimacion(est, ajustes)}
     <ul>${filas || '<li class="nota">No hay turnos en este periodo. Pulsa + para añadir uno.</li>'}</ul>`;
 
   el.querySelector('#mes-ant').onclick = () => cambiarMes(-1);
@@ -118,9 +268,7 @@ function vistaMes(el) {
   el.querySelectorAll('.pestana').forEach((b) => {
     b.onclick = () => { estado.periodo = b.dataset.p; render(); };
   });
-  el.querySelectorAll('.fila').forEach((b) => {
-    b.onclick = () => { estado.editandoId = b.dataset.id; estado.vista = 'turno'; render(); };
-  });
+  enlazarFilas(el);
 }
 
 // ---------- Añadir / editar turno ----------
@@ -130,7 +278,10 @@ function vistaTurno(el) {
     ? almacen.listarTurnos().find((t) => t.id === estado.editandoId)
     : null;
   $('#titulo').textContent = editando ? 'Editar turno' : 'Nuevo turno';
-  const v = editando || { fecha: hoyISO(), asignadoEntrada: '', asignadoSalida: '', realEntrada: '', realSalida: '', nota: '' };
+  const v = editando || {
+    fecha: estado.fechaNueva || hoyISO(),
+    asignadoEntrada: '', asignadoSalida: '', realEntrada: '', realSalida: '', nota: '',
+  };
 
   el.innerHTML = `
     <form id="form" class="tarjeta" novalidate>
@@ -156,6 +307,7 @@ function vistaTurno(el) {
     </form>`;
 
   const form = el.querySelector('#form');
+  const volver = () => irA(estado.volverA || 'calendario');
 
   // Al rellenar lo asignado, se copia a lo real si estaba vacío (lo normal es cumplir el turno).
   for (const [asig, real] of [['asignadoEntrada', 'realEntrada'], ['asignadoSalida', 'realSalida']]) {
@@ -164,13 +316,13 @@ function vistaTurno(el) {
     });
   }
 
-  el.querySelector('#cancelar').onclick = () => irA('mes');
+  el.querySelector('#cancelar').onclick = volver;
   const borrar = el.querySelector('#borrar');
   if (borrar) {
     borrar.onclick = () => {
       if (!confirm('¿Borrar este turno?')) return;
       almacen.borrarTurno(editando.id);
-      irA('mes');
+      volver();
     };
   }
 
@@ -191,8 +343,8 @@ function vistaTurno(el) {
     if (avisos.length && !confirm(`${avisos.join('\n')}\n\n¿Guardar igualmente?`)) return;
     almacen.guardarTurno(turno);
     const [a, m] = turno.fecha.split('-').map(Number);
-    estado.anio = a; estado.mes = m; estado.periodo = 'mes';
-    irA('mes');
+    estado.anio = a; estado.mes = m; estado.periodo = 'mes'; estado.ancla = turno.fecha;
+    volver();
   };
 }
 
@@ -202,14 +354,10 @@ function vistaAnual(el) {
   $('#titulo').textContent = 'Año';
   const ajustes = almacen.cargarAjustes();
   const hechas = horasDelAnio(almacen.listarTurnos(), estado.anio);
-  const restantes = Math.round((ajustes.limiteAnual - hechas) * 100) / 100;
+  const restantes = redondear(ajustes.limiteAnual - hechas);
 
   el.innerHTML = `
-    <div class="cabecera">
-      <button class="icono" id="anio-ant" aria-label="Año anterior">‹</button>
-      <b>${estado.anio}</b>
-      <button class="icono" id="anio-sig" aria-label="Año siguiente">›</button>
-    </div>
+    ${cabeceraNav('anio-ant', String(estado.anio), 'anio-sig', 'Año anterior', 'Año siguiente')}
     <div class="tarjeta">
       <h2>Horas del contrato</h2>
       <progress max="${ajustes.limiteAnual}" value="${Math.min(hechas, ajustes.limiteAnual)}"></progress>
@@ -218,7 +366,7 @@ function vistaAnual(el) {
         <tr><td>Límite anual</td><td>${horas(ajustes.limiteAnual)}</td></tr>
         <tr class="total"><td>${restantes >= 0 ? 'Te quedan' : 'Te has pasado'}</td><td>${horas(Math.abs(restantes))}</td></tr>
       </table>
-      <p class="nota">Cuenta todas las horas reales trabajadas del año (asignadas + extra).</p>
+      <p class="nota">Cuenta todas las horas reales trabajadas del año (ordinarias + extra).</p>
     </div>`;
   el.querySelector('#anio-ant').onclick = () => { estado.anio -= 1; render(); };
   el.querySelector('#anio-sig').onclick = () => { estado.anio += 1; render(); };
@@ -235,6 +383,14 @@ const CAMPOS_AJUSTES = [
   ['limiteAnual', 'Límite anual de horas'],
 ];
 
+function filaJornada(j) {
+  return `<div class="rejilla jornada">
+    <label>Desde <input type="date" name="jdesde" value="${esc(j.desde)}"></label>
+    <label>Horas por semana <input type="number" name="jhoras" step="0.5" min="0" inputmode="decimal" value="${esc(j.horas)}"></label>
+    <button type="button" class="peligro quitar-j" style="grid-column:1/-1">Quitar</button>
+  </div>`;
+}
+
 function vistaAjustes(el) {
   $('#titulo').textContent = 'Ajustes';
   const ajustes = almacen.cargarAjustes();
@@ -246,6 +402,10 @@ function vistaAjustes(el) {
   el.innerHTML = `
     <form id="form-aj" class="tarjeta" novalidate>
       ${campos}
+      <h2>Jornada semanal</h2>
+      <p class="nota">Horas ordinarias por semana (lunes a domingo). Lo que pasa de ahí cuenta como extra. Cada semana usa la jornada vigente el lunes. Añade una fila cuando cambie el contrato.</p>
+      <div id="jornadas">${ajustes.jornadas.map(filaJornada).join('')}</div>
+      <div class="acciones"><button type="button" class="secundario" id="mas-jornada">+ Añadir cambio de jornada</button></div>
       <p class="nota">Valores de la nómina de octubre de 2026. El precio por hora del salario base no sale de la nómina (se paga por días): empieza igual que la hora extra y se puede cambiar.</p>
       <p class="error" id="msg-aj" role="alert"></p>
       <div class="acciones"><button type="submit" class="primario">Guardar ajustes</button></div>
@@ -260,10 +420,24 @@ function vistaAjustes(el) {
       <div id="copia"></div>
     </div>`;
 
+  const contenedor = el.querySelector('#jornadas');
+  contenedor.addEventListener('click', (e) => {
+    if (e.target.classList.contains('quitar-j')) e.target.closest('.jornada').remove();
+  });
+  el.querySelector('#mas-jornada').onclick = () => {
+    contenedor.insertAdjacentHTML('beforeend', filaJornada({ desde: hoyISO(), horas: 25 }));
+  };
+
   el.querySelector('#form-aj').onsubmit = (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
-    const nuevos = {};
+    const jornadas = [...contenedor.querySelectorAll('.jornada')].map((fila) => ({
+      desde: fila.querySelector('[name=jdesde]').value,
+      horas: Number(fila.querySelector('[name=jhoras]').value),
+    }));
+    const errorJornadas = validarJornadas(jornadas);
+    if (errorJornadas) { $('#msg-aj').textContent = errorJornadas; return; }
+    const nuevos = { jornadas: jornadas.sort((a, b) => a.desde.localeCompare(b.desde)) };
     for (const [clave] of CAMPOS_AJUSTES) {
       const n = Number(f.get(clave));
       if (!Number.isFinite(n) || n < 0) { $('#msg-aj').textContent = 'Revisa los números: tienen que ser cero o más.'; return; }
@@ -310,5 +484,12 @@ function vistaAjustes(el) {
 document.querySelectorAll('#menu button').forEach((b) => {
   b.onclick = () => irA(b.dataset.vista);
 });
-$('#nuevo').onclick = () => { estado.editandoId = null; estado.vista = 'turno'; render(); };
+$('#nuevo').onclick = () => {
+  let fecha = hoyISO();
+  if (estado.vista === 'semana') {
+    const sem = semanaDe(estado.ancla);
+    if (fecha < sem.desde || fecha > sem.hasta) fecha = sem.desde;
+  }
+  abrirTurno({ fecha });
+};
 render();

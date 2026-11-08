@@ -12,6 +12,12 @@ export const AJUSTES_POR_DEFECTO = {
   descuentosPct: 6.5,
   irpfPct: 0,
   limiteAnual: 896,
+  // Horas semanales ordinarias: 20 h desde el inicio del contrato (02/10/2026) y 25 h desde
+  // el 19/10/2026 (variación de jornada firmada el 16/10/2026). Lo que pasa del tope es extra.
+  jornadas: [
+    { desde: '2026-10-02', horas: 20 },
+    { desde: '2026-10-19', horas: 25 },
+  ],
 };
 
 const nuevoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

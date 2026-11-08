@@ -6,6 +6,8 @@ const MIN = 60000;
 const HORA = 60 * MIN;
 const DIA = 24 * HORA;
 
+const dos = (n) => String(n).padStart(2, '0');
+
 export function redondear(n, dec = 2) {
   const f = 10 ** dec;
   return Math.round((n + Number.EPSILON) * f) / f;
@@ -39,37 +41,119 @@ export function horasNocturnas(iv) {
   return total / HORA;
 }
 
-// Limitación conocida: asignado y real se anclan a la misma fecha. Si el turno
-// asignado cruza la medianoche y el real empieza ya pasada la medianoche
-// (llega tarde, p. ej. a la 01:00), no se detecta el solape.
+// Un turno por sí solo: asignadas, trabajadas, nocturnas y diferencia.
+// Las horas extra NO se calculan aquí: dependen de la semana (ver detallarTurnos).
 export function calcularTurno(t) {
   const asig = intervalo(t.fecha, t.asignadoEntrada, t.asignadoSalida);
   const real = intervalo(t.fecha, t.realEntrada, t.realSalida);
   const asignadas = (asig.fin - asig.ini) / HORA;
   const trabajadas = (real.fin - real.ini) / HORA;
-  const extra = trabajadas - solape(real, asig) / HORA;
   return {
     asignadas: redondear(asignadas),
     trabajadas: redondear(trabajadas),
-    extra: redondear(extra),
     nocturnas: redondear(horasNocturnas(real)),
     diferencia: redondear(trabajadas - asignadas),
   };
 }
 
+// ---- Fechas (todas 'AAAA-MM-DD') ----
+
+export function sumarDias(fecha, n) {
+  const [a, m, d] = fecha.split('-').map(Number);
+  const f = new Date(Date.UTC(a, m - 1, d) + n * DIA);
+  return `${f.getUTCFullYear()}-${dos(f.getUTCMonth() + 1)}-${dos(f.getUTCDate())}`;
+}
+
+// Semana de lunes a domingo que contiene la fecha.
+export function semanaDe(fecha) {
+  const [a, m, d] = fecha.split('-').map(Number);
+  const dia = new Date(Date.UTC(a, m - 1, d)).getUTCDay(); // 0 = domingo
+  const desde = sumarDias(fecha, -((dia + 6) % 7));
+  return { desde, hasta: sumarDias(desde, 6) };
+}
+
+// Casillas del calendario de un mes, empezando en lunes: fecha o null para los huecos.
+// La longitud siempre es múltiplo de 7.
+export function rejillaMes(anio, mes) {
+  const primero = `${anio}-${dos(mes)}-01`;
+  const huecos = (new Date(Date.UTC(anio, mes - 1, 1)).getUTCDay() + 6) % 7;
+  const ultimo = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+  const celdas = Array(huecos).fill(null);
+  for (let i = 0; i < ultimo; i++) celdas.push(sumarDias(primero, i));
+  while (celdas.length % 7) celdas.push(null);
+  return celdas;
+}
+
+// ---- Jornada semanal (tope de horas ordinarias) ----
+
+// `topes` es un número fijo, o una lista [{ desde: 'AAAA-MM-DD', horas }] con los cambios
+// de jornada. Devuelve las horas semanales vigentes en esa fecha; si la fecha es anterior
+// al primer cambio, vale el primero.
+export function topeDeFecha(fecha, topes) {
+  if (typeof topes === 'number') return topes;
+  const orden = topes.slice().sort((a, b) => a.desde.localeCompare(b.desde));
+  let horas = orden[0].horas;
+  for (const j of orden) if (j.desde <= fecha) horas = j.horas;
+  return horas;
+}
+
+// Devuelve un texto de error, o '' si la lista de jornadas es correcta.
+export function validarJornadas(lista) {
+  if (!Array.isArray(lista) || lista.length === 0) return 'Pon al menos una jornada.';
+  const vistas = new Set();
+  for (const j of lista) {
+    if (!RE_FECHA.test(j.desde || '')) return 'Falta la fecha de una jornada.';
+    if (!Number.isFinite(j.horas) || j.horas <= 0) return 'Las horas de cada jornada tienen que ser más de 0.';
+    if (vistas.has(j.desde)) return 'Hay dos jornadas con la misma fecha.';
+    vistas.add(j.desde);
+  }
+  return '';
+}
+
+// ---- Tope semanal ----
+
+// Reparte las horas de cada turno en ordinarias y extra (complementarias).
+// Las extra son las horas trabajadas de la semana (lunes a domingo) que pasan del tope
+// semanal (el vigente el lunes de esa semana, ver topeDeFecha), estén o no dentro del
+// turno asignado. Hay que pasar TODOS los turnos
+// (no solo los de un mes) para que una semana que cruza de mes se cuente entera.
+// Devuelve un Map: turno (el mismo objeto) → { asignadas, trabajadas, nocturnas,
+// diferencia, extra, ordinarias }.
+export function detallarTurnos(turnos, topes) {
+  const detalle = new Map();
+  const acumulado = new Map(); // lunes de la semana → horas ya trabajadas
+  const orden = turnos.slice().sort((a, b) => (a.fecha + a.realEntrada).localeCompare(b.fecha + b.realEntrada));
+  for (const t of orden) {
+    const c = calcularTurno(t);
+    const semana = semanaDe(t.fecha).desde;
+    const despues = (acumulado.get(semana) || 0) + c.trabajadas;
+    acumulado.set(semana, despues);
+    const extra = Math.min(c.trabajadas, Math.max(0, despues - topeDeFecha(semana, topes)));
+    detalle.set(t, { ...c, extra: redondear(extra), ordinarias: redondear(c.trabajadas - extra) });
+  }
+  return detalle;
+}
+
 // ---- Estimación de nómina ----
 
-export function estimarNomina(turnos, ajustes) {
+// `turnos` son los del periodo a estimar; `todos` son todos los que hay (para que el
+// tope semanal cuente también las horas de otras semanas o meses). Si no se pasa
+// `todos`, se usan solo `turnos`.
+export function estimarNomina(turnos, ajustes, todos = turnos) {
+  const topes = ajustes.jornadas ?? ajustes.topeSemanal;
+  const detalle = detallarTurnos(todos, topes);
   let asignadas = 0;
+  let ordinarias = 0;
   let extra = 0;
   let nocturnas = 0;
   for (const t of turnos) {
-    const c = calcularTurno(t);
+    const c = detalle.get(t) || detallarTurnos([t], topes).get(t);
     asignadas += c.asignadas;
+    ordinarias += c.ordinarias;
     extra += c.extra;
     nocturnas += c.nocturnas;
   }
-  const base = asignadas * ajustes.precioBase;
+  const base = ordinarias * ajustes.precioBase;
   const pExtra = extra * ajustes.precioExtra;
   const pNocturna = nocturnas * ajustes.precioNocturna;
   const bruto = base + pExtra + pNocturna;
@@ -77,6 +161,7 @@ export function estimarNomina(turnos, ajustes) {
   const irpf = (bruto * ajustes.irpfPct) / 100;
   return {
     horasAsignadas: redondear(asignadas),
+    horasOrdinarias: redondear(ordinarias),
     horasExtra: redondear(extra),
     horasNocturnas: redondear(nocturnas),
     base: redondear(base),
@@ -90,8 +175,6 @@ export function estimarNomina(turnos, ajustes) {
 }
 
 // ---- Periodos ----
-
-const dos = (n) => String(n).padStart(2, '0');
 
 export function periodosDelMes(anio, mes) {
   const ultimo = new Date(Date.UTC(anio, mes, 0)).getUTCDate();

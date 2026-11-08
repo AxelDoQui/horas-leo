@@ -97,6 +97,24 @@ progress { width: 100%; height: 14px; }
   display: flex; background: var(--tarjeta); border-top: 1px solid var(--borde);
   padding-bottom: env(safe-area-inset-bottom);
 }
-#menu button { flex: 1; border: 0; background: none; min-height: 56px; color: var(--suave); }
+#menu button { flex: 1; border: 0; background: none; min-height: 56px; color: var(--suave); font-size: .85rem; padding: 0 2px; }
+.calendario { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 12px 0 8px; }
+.calendario .cab { text-align: center; color: var(--suave); font-size: .8rem; padding: 2px 0; }
+.dia {
+  display: grid; place-items: center; gap: 0; min-height: 52px; padding: 4px 0;
+  background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px;
+}
+.dia b { font-weight: 600; line-height: 1.2; }
+.dia i { font-style: normal; font-size: .9rem; line-height: 1; }
+.dia.lleno { border-color: var(--extra); }
+.dia.lleno i { color: var(--extra); }
+.dia.falta i { color: var(--aviso); }
+.dia.hoy { outline: 2px solid var(--acento); outline-offset: -1px; }
+.vacio { min-height: 52px; }
+.leyenda { color: var(--suave); font-size: .85rem; margin: 4px 0 12px; }
+.dia-semana { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 0; }
+.dia-semana b { text-transform: capitalize; }
+.dia-semana .secundario { min-height: 36px; padding: 4px 12px; font-size: .9rem; }
+.dia-semana .vacio-txt { color: var(--aviso); font-size: .9rem; }
 #menu button.activo { color: var(--acento); font-weight: 600; }
 [hidden] { display: none !important; }
