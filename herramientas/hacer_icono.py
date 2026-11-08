@@ -1,4 +1,4 @@
-"""Dibuja el icono de «Horas Leo» (un reloj blanco sobre azul) y lo escribe en todos
+"""Dibuja el icono de «Horas Leo» (un reloj blanco con el nombre debajo, sobre azul) y lo escribe en todos
 los tamaños de Android dentro de android/app/src/main/res.
 
 Uso:  py -I herramientas/hacer_icono.py
@@ -8,8 +8,15 @@ import math
 import os
 import sys
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
+NOMBRE = "Horas Leo"
+# Tipografías en negrita de Windows, por orden de preferencia.
+FUENTES = [
+    r"C:\Windows\Fonts\segoeuib.ttf",
+    r"C:\Windows\Fonts\arialbd.ttf",
+    r"C:\Windows\Fonts\verdanab.ttf",
+]
 AZUL = (31, 111, 235, 255)  # #1F6FEB, el azul de la app
 BLANCO = (255, 255, 255, 255)
 RES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "android", "app", "src", "main", "res")
@@ -48,6 +55,32 @@ def dibujar_reloj(d, cx, cy, radio):
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=BLANCO)
 
 
+def fuente_de_ancho(ancho):
+    """Fuente en negrita con el tamaño justo para que NOMBRE mida `ancho` píxeles."""
+    ruta = next((r for r in FUENTES if os.path.exists(r)), None)
+    if ruta is None:
+        sys.exit("No encuentro ninguna tipografía en negrita en C:\\Windows\\Fonts.")
+    prueba = ImageFont.truetype(ruta, 200)
+    izq, _, der, _ = prueba.getbbox(NOMBRE)
+    return ImageFont.truetype(ruta, max(1, int(200 * ancho / (der - izq))))
+
+
+def dibujar_contenido(d, g, zona):
+    """Reloj arriba y NOMBRE debajo, centrados, ocupando `zona` (fracción del lado) de ancho."""
+    ancho = g * zona
+    fuente = fuente_de_ancho(ancho)
+    izq, arriba, der, abajo = d.textbbox((0, 0), NOMBRE, font=fuente)
+    alto_texto = abajo - arriba
+    diametro = ancho * 0.60
+    hueco = ancho * 0.07
+    total = diametro + hueco + alto_texto
+    y0 = (g - total) / 2
+    dibujar_reloj(d, g / 2, y0 + diametro / 2, diametro / 2)
+    x = (g - (der - izq)) / 2 - izq
+    y = y0 + diametro + hueco - arriba
+    d.text((x, y), NOMBRE, font=fuente, fill=BLANCO)
+
+
 def lienzo(lado):
     g = lado * SUPER
     im = Image.new("RGBA", (g, g), (0, 0, 0, 0))
@@ -61,21 +94,22 @@ def reducir(im, lado):
 def icono_cuadrado(lado):
     im, d, g = lienzo(lado)
     d.rounded_rectangle([0, 0, g - 1, g - 1], radius=g * 0.22, fill=AZUL)
-    dibujar_reloj(d, g / 2, g / 2, g * 0.31)
+    dibujar_contenido(d, g, 0.78)
     return reducir(im, lado)
 
 
 def icono_redondo(lado):
     im, d, g = lienzo(lado)
     d.ellipse([0, 0, g - 1, g - 1], fill=AZUL)
-    dibujar_reloj(d, g / 2, g / 2, g * 0.29)
+    dibujar_contenido(d, g, 0.66)
     return reducir(im, lado)
 
 
 def capa_adaptativa(lado):
-    """Solo el reloj, sobre transparente y dentro de la zona segura (66 de 108)."""
+    """Reloj y nombre sobre transparente, dentro de lo que no recorta ninguna máscara
+    (círculo de 72 sobre 108; por eso la zona es solo el 48 % del lado)."""
     im, d, g = lienzo(lado)
-    dibujar_reloj(d, g / 2, g / 2, g * 0.27)
+    dibujar_contenido(d, g, 0.48)
     return reducir(im, lado)
 
 
