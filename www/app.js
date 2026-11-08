@@ -5,6 +5,8 @@ import {
 } from './calculo.js';
 import { crearAlmacen } from './almacen.js';
 import { pedirHora } from './selector-hora.js';
+import { buscarActualizacion } from './actualizar.js';
+import { VERSION } from './version.js';
 
 const almacen = crearAlmacen(window.localStorage);
 const ahora = new Date();
@@ -172,6 +174,14 @@ function tarjetaEstimacion(est, ajustes) {
 
 // ---------- Calendario ----------
 
+// Versión nueva en GitHub (se rellena al abrir la app, si hay internet).
+let novedad = null;
+function avisoNovedad() {
+  if (!novedad) return '';
+  return `<div class="tarjeta"><p class="aviso">Hay una versión nueva: <b>${esc(novedad.version)}</b> (tienes la ${esc(VERSION)}). Tus datos se conservan al instalarla.</p>
+    <div class="acciones"><button class="primario" id="bajar-apk">Descargar e instalar</button></div></div>`;
+}
+
 // Aviso de copia de seguridad: los datos solo viven en este móvil.
 function avisoCopia() {
   if (!almacen.listarTurnos().length) return '';
@@ -210,6 +220,7 @@ function vistaCalendario(el) {
 
   const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => `<span class="cab">${d}</span>`).join('');
   el.innerHTML = `
+    ${avisoNovedad()}
     ${avisoCopia()}
     ${cabeceraNav('mes-ant', nombreMes(), 'mes-sig', 'Mes anterior', 'Mes siguiente')}
     <div class="calendario">${cab}${casillas}</div>
@@ -218,6 +229,8 @@ function vistaCalendario(el) {
 
   el.querySelector('#mes-ant').onclick = () => cambiarMes(-1);
   el.querySelector('#mes-sig').onclick = () => cambiarMes(1);
+  const bajar = el.querySelector('#bajar-apk');
+  if (bajar) bajar.onclick = () => window.open(novedad.apk || novedad.pagina, '_blank');
   const irCopia = el.querySelector('#ir-copia');
   if (irCopia) irCopia.onclick = () => irA('ajustes');
   el.querySelectorAll('.dia').forEach((b) => {
@@ -566,7 +579,8 @@ function vistaAjustes(el) {
         <button class="secundario" id="importar-ver">Restaurar copia</button>
       </div>
       <div id="copia"></div>
-    </div>`;
+    </div>
+    <p class="nota" style="text-align:center">Horas Leo · versión ${esc(VERSION)}</p>`;
 
   const contenedor = el.querySelector('#jornadas');
   contenedor.addEventListener('click', (e) => {
@@ -647,6 +661,11 @@ if (AppNativa) {
     else AppNativa.exitApp();
   });
 }
+
+buscarActualizacion().then((r) => {
+  novedad = r;
+  if (r && estado.vista === 'calendario') render();
+});
 
 $('#nuevo').onclick = () => {
   let fecha = hoyISO();
