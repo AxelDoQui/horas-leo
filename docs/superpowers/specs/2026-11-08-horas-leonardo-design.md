@@ -108,3 +108,16 @@ Cuentas, sincronización entre móviles, publicación en Google Play, cálculo d
 
 Tests del cálculo y prueba de la interfaz en el navegador antes de empaquetar.
 El aspecto en el móvil real lo confirma Leonardo al instalarlo.
+
+## Actualizaciones por GitHub (2026-11-08)
+
+Repositorio público `AxelDoQui/horas-leo`. Al abrir, la app pregunta por la última Release
+(`api.github.com/repos/.../releases/latest`, sin claves); si su etiqueta es más nueva que
+`www/version.js`, el Calendario muestra «Descargar e instalar», que abre el APK en el navegador.
+Android exige tocar «Instalar», así que no puede ser del todo automático. Sin internet, no pasa nada.
+
+**Publicar una versión nueva:** subir `VERSION` en `www/version.js`, `npx cap sync android`,
+`gradlew assembleDebug`, copiar el APK a `Horas-Leo.apk` y
+`gh release create vX.Y.Z Horas-Leo.apk --repo AxelDoQui/horas-leo`.
+El APK debe compilarse siempre en este PC (misma clave de depuración) o Android no lo dejará
+instalar encima.
