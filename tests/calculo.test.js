@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   intervalo, calcularTurno, horasNocturnas, detallarTurnos,
-  sumarDias, semanaDe, rejillaMes, topeDeFecha, validarJornadas,
+  sumarDias, semanaDe, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
   estimarNomina, periodosDelMes, filtrarPeriodo, horasDelAnio, validarTurno,
 } from '../www/calculo.js';
 
@@ -124,6 +124,13 @@ test('sumarDias: cruza mes y año', () => {
   assert.equal(sumarDias('2026-10-31', 1), '2026-11-01');
   assert.equal(sumarDias('2026-12-31', 1), '2027-01-01');
   assert.equal(sumarDias('2026-10-05', -7), '2026-09-28');
+});
+
+test('diasEntre: cuenta días de calendario, también entre meses y en negativo', () => {
+  assert.equal(diasEntre('2026-10-01', '2026-10-15'), 14);
+  assert.equal(diasEntre('2026-10-25', '2026-10-25'), 0);
+  assert.equal(diasEntre('2026-10-30', '2026-11-02'), 3);
+  assert.equal(diasEntre('2026-10-15', '2026-10-01'), -14);
 });
 
 test('semanaDe: de lunes a domingo, también si la fecha es domingo', () => {

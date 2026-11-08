@@ -75,6 +75,17 @@ precios del mes difieren, así que el resultado es aproximado y así se le dice 
 3. **Ajustes:** precios y descuentos, ya rellenados con los de octubre.
 4. **Contador anual:** horas hechas frente al límite anual (1.120 h).
 
+**Añadidos tras probar en un Android real (2026-11-08):**
+- **Días libres.** Un día se puede marcar como libre desde el formulario («Día libre»). Cuenta
+  como rellenado (marca «–», borde discontinuo) para que el calendario no llene de ○ los días de
+  descanso. Tocar un día libre lo quita. Guardar un turno en un día libre lo quita de libres, y
+  no se puede marcar libre un día con turno. Van en la copia de seguridad.
+- **Botón «atrás» de Android.** Con el plugin `@capacitor/app`: en el formulario lo cierra, en
+  cualquier otra pantalla vuelve al Calendario, y solo desde el Calendario sale de la app.
+  Sin esto Android cerraba la app y se perdía lo escrito.
+- **Aviso de copia de seguridad.** En el Calendario, si hay turnos y no hay copia hecha o la
+  última tiene más de 14 días, sale un aviso con un botón que lleva a Ajustes.
+
 ## Estructura
 
 Carpeta `Horas Leonardo APP` con su propio git, separada de Cierre de Caja.

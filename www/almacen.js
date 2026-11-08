@@ -4,6 +4,9 @@ import { validarTurno } from './calculo.js';
 
 const CLAVE_TURNOS = 'horas.turnos';
 const CLAVE_AJUSTES = 'horas.ajustes';
+const CLAVE_LIBRES = 'horas.libres'; // días marcados como libres: ['AAAA-MM-DD', ...]
+const CLAVE_COPIA = 'horas.ultimaCopia'; // fecha de la última copia de seguridad hecha
+const RE_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 export const AJUSTES_POR_DEFECTO = {
   precioBase: 9.54,
@@ -54,7 +57,33 @@ export function crearAlmacen(storage) {
     if (i >= 0) todos[i] = t;
     else todos.push(t);
     escribir(CLAVE_TURNOS, todos);
+    quitarLibre(t.fecha); // un día con turno ya no es libre
     return t;
+  }
+
+  function listarLibres() {
+    return leer(CLAVE_LIBRES, []).slice().sort();
+  }
+
+  function marcarLibre(fecha) {
+    const libres = leer(CLAVE_LIBRES, []);
+    if (!libres.includes(fecha)) {
+      libres.push(fecha);
+      escribir(CLAVE_LIBRES, libres);
+    }
+  }
+
+  function quitarLibre(fecha) {
+    const libres = leer(CLAVE_LIBRES, []);
+    if (libres.includes(fecha)) escribir(CLAVE_LIBRES, libres.filter((f) => f !== fecha));
+  }
+
+  function ultimaCopia() {
+    return leer(CLAVE_COPIA, null);
+  }
+
+  function registrarCopia(fecha) {
+    escribir(CLAVE_COPIA, fecha);
   }
 
   function borrarTurno(id) {
@@ -71,7 +100,7 @@ export function crearAlmacen(storage) {
 
   function exportar() {
     return JSON.stringify(
-      { version: 1, turnos: leer(CLAVE_TURNOS, []), ajustes: cargarAjustes() },
+      { version: 1, turnos: leer(CLAVE_TURNOS, []), libres: listarLibres(), ajustes: cargarAjustes() },
       null,
       2,
     );
@@ -95,10 +124,21 @@ export function crearAlmacen(storage) {
         throw new Error(`Hay un turno con datos incompletos (${t.fecha || 'sin fecha'}): ${errores[0]}`);
       }
     }
+    const libres = datos.libres ?? [];
+    if (!Array.isArray(libres) || libres.some((f) => !RE_FECHA.test(f))) {
+      throw new Error('El texto no es una copia válida.');
+    }
     escribir(CLAVE_TURNOS, turnos);
+    escribir(CLAVE_LIBRES, libres);
     if (datos.ajustes) guardarAjustes(datos.ajustes);
     return turnos.length;
   }
 
-  return { listarTurnos, guardarTurno, borrarTurno, cargarAjustes, guardarAjustes, exportar, importar };
+  return {
+    listarTurnos, guardarTurno, borrarTurno,
+    listarLibres, marcarLibre, quitarLibre,
+    cargarAjustes, guardarAjustes,
+    ultimaCopia, registrarCopia,
+    exportar, importar,
+  };
 }

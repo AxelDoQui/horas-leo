@@ -64,6 +64,15 @@ export function sumarDias(fecha, n) {
   return `${f.getUTCFullYear()}-${dos(f.getUTCMonth() + 1)}-${dos(f.getUTCDate())}`;
 }
 
+// Días de calendario entre dos fechas (negativo si `hasta` es anterior a `desde`).
+export function diasEntre(desde, hasta) {
+  const ms = (f) => {
+    const [a, m, d] = f.split('-').map(Number);
+    return Date.UTC(a, m - 1, d);
+  };
+  return Math.round((ms(hasta) - ms(desde)) / DIA);
+}
+
 // Semana de lunes a domingo que contiene la fecha.
 export function semanaDe(fecha) {
   const [a, m, d] = fecha.split('-').map(Number);

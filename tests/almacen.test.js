@@ -83,6 +83,57 @@ test('importar rechaza turnos con datos incompletos y no cambia nada', () => {
   assert.equal(a.listarTurnos().length, 1);
 });
 
+test('días libres: se marcan sin duplicar, salen ordenados y se quitan', () => {
+  const a = crearAlmacen(storageFalso());
+  a.marcarLibre('2026-10-09');
+  a.marcarLibre('2026-10-03');
+  a.marcarLibre('2026-10-09');
+  assert.deepEqual(a.listarLibres(), ['2026-10-03', '2026-10-09']);
+  a.quitarLibre('2026-10-03');
+  assert.deepEqual(a.listarLibres(), ['2026-10-09']);
+  a.quitarLibre('2026-12-01'); // quitar uno que no está no falla
+  assert.deepEqual(a.listarLibres(), ['2026-10-09']);
+});
+
+test('guardar un turno en un día libre lo quita de los libres', () => {
+  const a = crearAlmacen(storageFalso());
+  a.marcarLibre('2026-10-05');
+  a.marcarLibre('2026-10-06');
+  a.guardarTurno(turno('2026-10-05'));
+  assert.deepEqual(a.listarLibres(), ['2026-10-06']);
+});
+
+test('la copia incluye los días libres y al restaurarla vuelven', () => {
+  const a = crearAlmacen(storageFalso());
+  a.guardarTurno(turno('2026-10-05'));
+  a.marcarLibre('2026-10-06');
+  const b = crearAlmacen(storageFalso());
+  b.marcarLibre('2026-01-01'); // lo que hubiera antes se reemplaza
+  b.importar(a.exportar());
+  assert.deepEqual(b.listarLibres(), ['2026-10-06']);
+});
+
+test('importar una copia antigua sin días libres funciona (quedan vacíos)', () => {
+  const b = crearAlmacen(storageFalso());
+  assert.equal(b.importar(JSON.stringify({ turnos: [turno('2026-10-05')] })), 1);
+  assert.deepEqual(b.listarLibres(), []);
+});
+
+test('importar con días libres mal escritos lanza error y no cambia nada', () => {
+  const a = crearAlmacen(storageFalso());
+  a.marcarLibre('2026-10-06');
+  const mala = JSON.stringify({ turnos: [], libres: ['mañana'] });
+  assert.throws(() => a.importar(mala), /no es una copia válida/);
+  assert.deepEqual(a.listarLibres(), ['2026-10-06']);
+});
+
+test('última copia: vacía al principio, y se guarda y se lee', () => {
+  const a = crearAlmacen(storageFalso());
+  assert.equal(a.ultimaCopia(), null);
+  a.registrarCopia('2026-11-08');
+  assert.equal(a.ultimaCopia(), '2026-11-08');
+});
+
 test('JSON dañado: devuelve vacío pero guarda el texto original aparte', () => {
   const s = storageFalso();
   s.setItem('horas.turnos', '{roto');

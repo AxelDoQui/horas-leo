@@ -1,6 +1,6 @@
 import {
   calcularTurno, detallarTurnos, estimarNomina, filtrarPeriodo, periodosDelMes, horasDelAnio,
-  validarTurno, semanaDe, sumarDias, rejillaMes, topeDeFecha, validarJornadas,
+  validarTurno, semanaDe, sumarDias, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
 } from './calculo.js';
 import { crearAlmacen } from './almacen.js';
 
@@ -66,13 +66,33 @@ function abrirTurno({ id = null, fecha = null } = {}) {
   estado.editandoId = id;
   estado.fechaNueva = fecha;
   estado.vista = 'turno';
+  // Una entrada en el historial para que el botón «atrás» de Android cierre el formulario
+  // en vez de salir de la app (el WebView de Capacitor retrocede por este historial).
+  history.pushState({ turno: true }, '');
   render();
 }
+
+let cerrando = false; // evita retroceder dos veces si se toca dos veces seguidas
+function cerrarTurno() {
+  if (cerrando) return;
+  if (history.state && history.state.turno) {
+    cerrando = true;
+    history.back(); // el aviso 'popstate' de abajo es el que cambia de pantalla
+  } else {
+    irA(estado.volverA || 'calendario');
+  }
+}
+
+window.addEventListener('popstate', () => {
+  cerrando = false;
+  if (estado.vista === 'turno') irA(estado.volverA || 'calendario');
+});
 
 function datos() {
   const todos = almacen.listarTurnos();
   const ajustes = almacen.cargarAjustes();
-  return { todos, ajustes, detalle: detallarTurnos(todos, ajustes.jornadas) };
+  const libres = new Set(almacen.listarLibres());
+  return { todos, libres, ajustes, detalle: detallarTurnos(todos, ajustes.jornadas) };
 }
 
 function cabeceraNav(idAnt, texto, idSig, textoAnt, textoSig) {
@@ -150,9 +170,22 @@ function tarjetaEstimacion(est, ajustes) {
 
 // ---------- Calendario ----------
 
+// Aviso de copia de seguridad: los datos solo viven en este móvil.
+function avisoCopia() {
+  if (!almacen.listarTurnos().length) return '';
+  const ultima = almacen.ultimaCopia();
+  const dias = ultima ? diasEntre(ultima, hoyISO()) : null;
+  if (dias !== null && dias <= 14) return '';
+  const cuando = dias === null
+    ? 'Todavía no has hecho ninguna copia de seguridad.'
+    : `Hace ${dias} días que no haces una copia de seguridad.`;
+  return `<div class="tarjeta"><p class="aviso">${cuando} Los datos solo están en este móvil.</p>
+    <div class="acciones"><button class="secundario" id="ir-copia">Hacer copia ahora</button></div></div>`;
+}
+
 function vistaCalendario(el) {
   $('#titulo').textContent = 'Calendario';
-  const { todos } = datos();
+  const { todos, libres } = datos();
   const porFecha = new Map();
   for (const t of todos) porFecha.set(t.fecha, (porFecha.get(t.fecha) || 0) + 1);
   const hoy = hoyISO();
@@ -163,27 +196,35 @@ function vistaCalendario(el) {
   const casillas = celdas.map((f) => {
     if (!f) return '<span class="vacio"></span>';
     const lleno = porFecha.has(f);
-    const falta = !lleno && f <= hoy;
-    if (lleno) rellenados += 1;
+    const libre = !lleno && libres.has(f);
+    const falta = !lleno && !libre && f <= hoy;
+    if (lleno || libre) rellenados += 1;
     if (falta) sinRellenar += 1;
-    const clases = ['dia', lleno ? 'lleno' : '', falta ? 'falta' : '', f === hoy ? 'hoy' : ''].join(' ');
-    const marca = lleno ? '✓' : (falta ? '○' : '');
-    const estadoTxt = lleno ? 'rellenado' : (falta ? 'sin rellenar' : '');
+    const clases = ['dia', lleno ? 'lleno' : '', libre ? 'libre' : '', falta ? 'falta' : '', f === hoy ? 'hoy' : ''].join(' ');
+    const marca = lleno ? '✓' : (libre ? '–' : (falta ? '○' : ''));
+    const estadoTxt = lleno ? 'con turno' : (libre ? 'día libre' : (falta ? 'sin rellenar' : ''));
     return `<button class="${clases}" data-f="${f}" aria-label="${esc(etiquetaDia(f))} ${estadoTxt}"><b>${Number(f.slice(8))}</b><i>${marca}</i></button>`;
   }).join('');
 
   const cab = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => `<span class="cab">${d}</span>`).join('');
   el.innerHTML = `
+    ${avisoCopia()}
     ${cabeceraNav('mes-ant', nombreMes(), 'mes-sig', 'Mes anterior', 'Mes siguiente')}
     <div class="calendario">${cab}${casillas}</div>
-    <p class="leyenda">✓ rellenado · ○ sin rellenar · Rellenados: ${rellenados} · Sin rellenar: ${sinRellenar}</p>
-    <p class="nota">Toca un día para añadir o ver su turno.</p>`;
+    <p class="leyenda">✓ turno · – libre · ○ sin rellenar · Rellenados: ${rellenados} · Sin rellenar: ${sinRellenar}</p>
+    <p class="nota">Toca un día para añadir su turno o marcarlo como libre. Tocar un día libre lo quita.</p>`;
 
   el.querySelector('#mes-ant').onclick = () => cambiarMes(-1);
   el.querySelector('#mes-sig').onclick = () => cambiarMes(1);
+  const irCopia = el.querySelector('#ir-copia');
+  if (irCopia) irCopia.onclick = () => irA('ajustes');
   el.querySelectorAll('.dia').forEach((b) => {
     b.onclick = () => {
       const f = b.dataset.f;
+      if (libres.has(f)) {
+        if (confirm(`¿Quitar el día libre del ${etiquetaDia(f)}?`)) { almacen.quitarLibre(f); render(); }
+        return;
+      }
       const delDia = todos.filter((t) => t.fecha === f);
       if (delDia.length === 0) abrirTurno({ fecha: f });
       else if (delDia.length === 1) abrirTurno({ id: delDia[0].id });
@@ -196,7 +237,7 @@ function vistaCalendario(el) {
 
 function vistaSemana(el) {
   $('#titulo').textContent = 'Semana';
-  const { todos, ajustes, detalle } = datos();
+  const { todos, libres, ajustes, detalle } = datos();
   const sem = semanaDe(estado.ancla);
   const turnos = filtrarPeriodo(todos, sem.desde, sem.hasta);
   const est = estimarNomina(turnos, ajustes, todos);
@@ -211,7 +252,9 @@ function vistaSemana(el) {
     const filas = delDia.length
       ? `<ul>${delDia.map((t) => filaTurno(t, detalle.get(t), false)).join('')}</ul>`
       : '';
-    const falta = !delDia.length && f <= hoy ? '<span class="vacio-txt">○ sin rellenar</span>' : '<span></span>';
+    const sinTurno = !delDia.length;
+    const falta = sinTurno && libres.has(f) ? '<span class="libre-txt">– día libre</span>'
+      : (sinTurno && f <= hoy ? '<span class="vacio-txt">○ sin rellenar</span>' : '<span></span>');
     dias.push(`<div class="dia-semana"><b>${esc(etiquetaDia(f))}</b>${falta}
       <button class="secundario" data-nuevo="${f}">${delDia.length ? '+ Otro' : '+ Añadir'}</button></div>${filas}`);
   }
@@ -301,13 +344,13 @@ function vistaTurno(el) {
       <p class="error" id="msg" role="alert"></p>
       <div class="acciones">
         <button type="button" class="secundario" id="cancelar">Cancelar</button>
-        ${editando ? '<button type="button" class="peligro" id="borrar">Borrar</button>' : ''}
+        ${editando ? '<button type="button" class="peligro" id="borrar">Borrar</button>' : '<button type="button" class="secundario" id="libre">Día libre</button>'}
         <button type="submit" class="primario">Guardar</button>
       </div>
     </form>`;
 
   const form = el.querySelector('#form');
-  const volver = () => irA(estado.volverA || 'calendario');
+  const volver = cerrarTurno;
 
   // Al rellenar lo asignado, se copia a lo real si estaba vacío (lo normal es cumplir el turno).
   for (const [asig, real] of [['asignadoEntrada', 'realEntrada'], ['asignadoSalida', 'realSalida']]) {
@@ -317,6 +360,21 @@ function vistaTurno(el) {
   }
 
   el.querySelector('#cancelar').onclick = volver;
+  const botonLibre = el.querySelector('#libre');
+  if (botonLibre) {
+    botonLibre.onclick = () => {
+      const fecha = form.elements.fecha.value;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { $('#msg').textContent = 'Falta la fecha.'; return; }
+      if (almacen.listarTurnos().some((t) => t.fecha === fecha)) {
+        $('#msg').textContent = 'Ese día ya tiene un turno. Bórralo primero si en realidad fue libre.';
+        return;
+      }
+      almacen.marcarLibre(fecha);
+      const [a, m] = fecha.split('-').map(Number);
+      estado.anio = a; estado.mes = m; estado.ancla = fecha;
+      volver();
+    };
+  }
   const borrar = el.querySelector('#borrar');
   if (borrar) {
     borrar.onclick = () => {
@@ -456,9 +514,11 @@ function vistaAjustes(el) {
       const ta = zona.querySelector('#texto-copia');
       try {
         await navigator.clipboard.writeText(ta.value);
+        almacen.registrarCopia(hoyISO());
         zona.querySelector('#msg-copia').textContent = 'Copiado.';
       } catch {
         ta.select();
+        almacen.registrarCopia(hoyISO()); // el texto está a la vista y seleccionado para copiarlo a mano
         zona.querySelector('#msg-copia').textContent = 'Selecciónalo y cópialo a mano.';
       }
     };
@@ -484,6 +544,18 @@ function vistaAjustes(el) {
 document.querySelectorAll('#menu button').forEach((b) => {
   b.onclick = () => irA(b.dataset.vista);
 });
+// Botón «atrás» de Android (solo existe dentro de la app instalada, no en el navegador).
+// Sin este aviso, Android cierra la app y se pierde lo que se estaba escribiendo.
+// Se accede por window.Capacitor porque esta web no usa empaquetador.
+const AppNativa = window.Capacitor?.Plugins?.App;
+if (AppNativa) {
+  AppNativa.addListener('backButton', () => {
+    if (estado.vista === 'turno') cerrarTurno();
+    else if (estado.vista !== 'calendario') irA('calendario');
+    else AppNativa.exitApp();
+  });
+}
+
 $('#nuevo').onclick = () => {
   let fecha = hoyISO();
   if (estado.vista === 'semana') {
