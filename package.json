@@ -5,5 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"tests/*.test.js\""
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.0"
   }
 }
