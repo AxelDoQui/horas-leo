@@ -244,3 +244,19 @@ export function validarTurno(t) {
   }
   return { errores, avisos };
 }
+
+// ¿La salida cae al día siguiente? (turnos de noche, p. ej. 22:00 → 02:00)
+export function cruzaMedianoche(entrada, salida) {
+  return salida <= entrada;
+}
+
+// Turno partido: ¿el segundo tramo empieza antes de que acabe el primero?
+// Se comprueba tanto en lo real como en lo asignado.
+export function tramosSolapan(a, b) {
+  const pares = [['asignadoEntrada', 'asignadoSalida'], ['realEntrada', 'realSalida']];
+  return pares.some(([e, s]) => {
+    const x = intervalo(a.fecha, a[e], a[s]);
+    const y = intervalo(b.fecha, b[e], b[s]);
+    return y.ini < x.fin && x.ini < y.fin;
+  });
+}

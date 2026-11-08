@@ -1,8 +1,10 @@
 import {
   calcularTurno, detallarTurnos, estimarNomina, filtrarPeriodo, periodosDelMes, horasDelAnio,
   validarTurno, semanaDe, sumarDias, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
+  cruzaMedianoche, tramosSolapan,
 } from './calculo.js';
 import { crearAlmacen } from './almacen.js';
+import { pedirHora } from './selector-hora.js';
 
 const almacen = crearAlmacen(window.localStorage);
 const ahora = new Date();
@@ -316,6 +318,42 @@ function vistaMes(el) {
 
 // ---------- Añadir / editar turno ----------
 
+const CAMPOS_TRAMO = ['asignadoEntrada', 'asignadoSalida', 'realEntrada', 'realSalida'];
+const NOMBRE_HORA = {
+  asignadoEntrada: 'Entrada asignada', asignadoSalida: 'Salida asignada',
+  realEntrada: 'Entrada real', realSalida: 'Salida real',
+};
+
+// Una hora se elige con el selector de ruedas; el valor vive en un input oculto para el formulario.
+function campoHora(nombre, etiqueta, valor) {
+  return `<label>${etiqueta}
+    <button type="button" class="hora ${valor ? '' : 'vacia'}" data-hora="${nombre}">${valor ? esc(valor) : '--:--'}</button>
+    <input type="hidden" name="${nombre}" value="${esc(valor)}"></label>`;
+}
+
+function bloqueTramo(suf, v) {
+  const c = (n) => v[n] || '';
+  return `
+      <h2>Asignado (cuadrante)</h2>
+      <div class="rejilla">
+        ${campoHora('asignadoEntrada' + suf, 'Entrada', c('asignadoEntrada'))}
+        ${campoHora('asignadoSalida' + suf, 'Salida', c('asignadoSalida'))}
+      </div>
+      <h2>Real (lo que trabajó)</h2>
+      <div class="rejilla">
+        ${campoHora('realEntrada' + suf, 'Entrada', c('realEntrada'))}
+        ${campoHora('realSalida' + suf, 'Salida', c('realSalida'))}
+      </div>
+      <p class="resumen-turno" data-resumen="${suf}"></p>`;
+}
+
+// Saca del formulario los cuatro datos de un tramo (suf = '' el primero, '2' el segundo).
+function leerTramo(f, suf, fecha, nota) {
+  const t = { fecha, nota };
+  for (const n of CAMPOS_TRAMO) t[n] = f.get(n + suf) || '';
+  return t;
+}
+
 function vistaTurno(el) {
   const editando = estado.editandoId
     ? almacen.listarTurnos().find((t) => t.id === estado.editandoId)
@@ -329,18 +367,15 @@ function vistaTurno(el) {
   el.innerHTML = `
     <form id="form" class="tarjeta" novalidate>
       <label>Fecha <input type="date" name="fecha" value="${esc(v.fecha)}" required></label>
-      <h2>Asignado (cuadrante)</h2>
-      <div class="rejilla">
-        <label>Entrada <input type="time" name="asignadoEntrada" value="${esc(v.asignadoEntrada)}" required></label>
-        <label>Salida <input type="time" name="asignadoSalida" value="${esc(v.asignadoSalida)}" required></label>
-      </div>
-      <h2>Real (lo que trabajó)</h2>
-      <div class="rejilla">
-        <label>Entrada <input type="time" name="realEntrada" value="${esc(v.realEntrada)}" required></label>
-        <label>Salida <input type="time" name="realSalida" value="${esc(v.realSalida)}" required></label>
-      </div>
+      ${bloqueTramo('', v)}
+      ${editando ? '' : `
+      <label class="partido"><input type="checkbox" id="partido"> Turno partido (dos tramos el mismo día)</label>
+      <div class="tramo2" id="tramo2" hidden>
+        <h2 style="margin-top:12px">Segundo tramo</h2>
+        ${bloqueTramo('2', {})}
+      </div>`}
       <label>Nota (opcional) <input type="text" name="nota" value="${esc(v.nota || '')}"></label>
-      <p class="nota">Si la salida es anterior a la entrada, el turno acaba al día siguiente.</p>
+      <p class="nota">Turno de noche: de 22:00 a 02:00 cuenta como 4 h y acaba al día siguiente.</p>
       <p class="error" id="msg" role="alert"></p>
       <div class="acciones">
         <button type="button" class="secundario" id="cancelar">Cancelar</button>
@@ -351,13 +386,62 @@ function vistaTurno(el) {
 
   const form = el.querySelector('#form');
   const volver = cerrarTurno;
+  const partido = el.querySelector('#partido');
+  const tramo2 = el.querySelector('#tramo2');
+  const sufijos = () => (partido && partido.checked ? ['', '2'] : ['']);
 
-  // Al rellenar lo asignado, se copia a lo real si estaba vacío (lo normal es cumplir el turno).
-  for (const [asig, real] of [['asignadoEntrada', 'realEntrada'], ['asignadoSalida', 'realSalida']]) {
-    form.elements[asig].addEventListener('change', () => {
-      if (!form.elements[real].value) form.elements[real].value = form.elements[asig].value;
+  // Una línea por tramo con las horas, la noche y si acaba al día siguiente.
+  function actualizarResumen() {
+    const f = new FormData(form);
+    el.querySelectorAll('[data-resumen]').forEach((p) => {
+      const suf = p.dataset.resumen;
+      const t = leerTramo(f, suf, form.elements.fecha.value || '2000-01-01', '');
+      if (CAMPOS_TRAMO.some((n) => !t[n]) || t.realEntrada === t.realSalida) { p.innerHTML = ''; return; }
+      const c = calcularTurno(t);
+      const dia = cruzaMedianoche(t.realEntrada, t.realSalida) ? ' · <b>sale al día siguiente</b>' : '';
+      const noche = c.nocturnas > 0 ? ` · ${horas(c.nocturnas)} nocturnas` : '';
+      p.innerHTML = `Trabajado: <b>${horas(c.trabajadas)}</b>${noche}${dia}`;
     });
   }
+
+  function ponerHora(input, valor) {
+    input.value = valor;
+    const boton = form.querySelector(`[data-hora="${input.name}"]`);
+    boton.textContent = valor;
+    boton.classList.remove('vacia');
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    actualizarResumen();
+  }
+
+  // Al rellenar lo asignado, se copia a lo real si estaba vacío (lo normal es cumplir el turno).
+  for (const suf of ['', '2']) {
+    for (const [asig, real] of [['asignadoEntrada', 'realEntrada'], ['asignadoSalida', 'realSalida']]) {
+      const origen = form.elements[asig + suf];
+      if (!origen) continue;
+      origen.addEventListener('change', () => {
+        const dest = form.elements[real + suf];
+        if (!dest.value) ponerHora(dest, origen.value);
+      });
+    }
+  }
+
+  form.addEventListener('click', async (e) => {
+    const boton = e.target.closest('[data-hora]');
+    if (!boton) return;
+    const nombre = boton.dataset.hora;
+    const input = form.elements[nombre];
+    // Si está vacío, la rueda empieza en la entrada del mismo tramo (para una salida).
+    const pareja = form.elements[nombre.replace('Salida', 'Entrada')];
+    const inicio = input.value || (nombre.includes('Salida') ? pareja.value : '');
+    const elegida = await pedirHora(inicio, NOMBRE_HORA[nombre.replace('2', '')]);
+    if (elegida) ponerHora(input, elegida);
+  });
+
+  if (partido) {
+    partido.onchange = () => { tramo2.hidden = !partido.checked; actualizarResumen(); };
+  }
+  form.elements.fecha.addEventListener('change', actualizarResumen);
+  actualizarResumen();
 
   el.querySelector('#cancelar').onclick = volver;
   const botonLibre = el.querySelector('#libre');
@@ -387,21 +471,27 @@ function vistaTurno(el) {
   form.onsubmit = (e) => {
     e.preventDefault();
     const f = new FormData(form);
-    const turno = {
-      id: editando ? editando.id : undefined,
-      fecha: f.get('fecha'),
-      asignadoEntrada: f.get('asignadoEntrada'),
-      asignadoSalida: f.get('asignadoSalida'),
-      realEntrada: f.get('realEntrada'),
-      realSalida: f.get('realSalida'),
-      nota: String(f.get('nota') || '').trim(),
-    };
-    const { errores, avisos } = validarTurno(turno);
+    const fecha = f.get('fecha');
+    const nota = String(f.get('nota') || '').trim();
+    const tramos = sufijos().map((suf, i) => leerTramo(f, suf, fecha, i === 0 ? nota : ''));
+    if (editando) tramos[0].id = editando.id;
+
+    const errores = [];
+    const avisos = [];
+    tramos.forEach((t, i) => {
+      const r = validarTurno(t);
+      const pref = tramos.length > 1 ? `Tramo ${i + 1}: ` : '';
+      errores.push(...r.errores.map((x) => pref + x));
+      avisos.push(...r.avisos.map((x) => pref + x));
+    });
+    if (!errores.length && tramos.length === 2 && tramosSolapan(tramos[0], tramos[1])) {
+      errores.push('El segundo tramo empieza antes de que acabe el primero.');
+    }
     if (errores.length) { $('#msg').textContent = errores.join(' '); return; }
     if (avisos.length && !confirm(`${avisos.join('\n')}\n\n¿Guardar igualmente?`)) return;
-    almacen.guardarTurno(turno);
-    const [a, m] = turno.fecha.split('-').map(Number);
-    estado.anio = a; estado.mes = m; estado.periodo = 'mes'; estado.ancla = turno.fecha;
+    tramos.forEach((t) => almacen.guardarTurno(t));
+    const [a, m] = fecha.split('-').map(Number);
+    estado.anio = a; estado.mes = m; estado.periodo = 'mes'; estado.ancla = fecha;
     volver();
   };
 }
@@ -550,7 +640,9 @@ document.querySelectorAll('#menu button').forEach((b) => {
 const AppNativa = window.Capacitor?.Plugins?.App;
 if (AppNativa) {
   AppNativa.addListener('backButton', () => {
-    if (estado.vista === 'turno') cerrarTurno();
+    const selector = document.querySelector('.selector-fondo');
+    if (selector) selector.click(); // el selector de hora abierto: «atrás» lo cancela
+    else if (estado.vista === 'turno') cerrarTurno();
     else if (estado.vista !== 'calendario') irA('calendario');
     else AppNativa.exitApp();
   });

@@ -4,6 +4,7 @@ import {
   intervalo, calcularTurno, horasNocturnas, detallarTurnos,
   sumarDias, semanaDe, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
   estimarNomina, periodosDelMes, filtrarPeriodo, horasDelAnio, validarTurno,
+  cruzaMedianoche, tramosSolapan,
 } from '../www/calculo.js';
 
 const turno = (ae, as, re, rs, fecha = '2026-10-05') => ({
@@ -290,4 +291,24 @@ test('validarTurno: un turno de más de 12 h da un aviso, no un error', () => {
 test('validarTurno: turno correcto no avisa de nada', () => {
   const v = validarTurno(turno('16:00', '20:00', '16:00', '20:00'));
   assert.deepEqual(v, { errores: [], avisos: [] });
+});
+
+test('cruzaMedianoche: salida igual o anterior a la entrada acaba al día siguiente', () => {
+  assert.equal(cruzaMedianoche('22:00', '02:00'), true);
+  assert.equal(cruzaMedianoche('14:00', '22:00'), false);
+  assert.equal(cruzaMedianoche('22:00', '22:00'), true);
+});
+
+test('turno de noche que sale a las 2: 4 h trabajadas, todas nocturnas', () => {
+  const c = calcularTurno({ fecha: '2026-10-09', asignadoEntrada: '22:00', asignadoSalida: '02:00', realEntrada: '22:00', realSalida: '02:00' });
+  assert.equal(c.trabajadas, 4);
+  assert.equal(c.nocturnas, 4);
+});
+
+test('tramosSolapan: turno partido correcto no solapa, el solapado sí', () => {
+  const a = { fecha: '2026-10-09', realEntrada: '09:00', realSalida: '13:00', asignadoEntrada: '09:00', asignadoSalida: '13:00' };
+  const b = { fecha: '2026-10-09', realEntrada: '17:00', realSalida: '21:00', asignadoEntrada: '17:00', asignadoSalida: '21:00' };
+  assert.equal(tramosSolapan(a, b), false);
+  assert.equal(tramosSolapan(a, { ...b, realEntrada: '12:00' }), true);
+  assert.equal(tramosSolapan(a, { ...b, asignadoEntrada: '12:30' }), true);
 });
