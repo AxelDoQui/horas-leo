@@ -170,3 +170,13 @@ progress { width: 100%; height: 14px; }
 .tramo2 { border-top: 1px dashed var(--borde); margin-top: 12px; padding-top: 4px; }
 .partido { display: flex; align-items: center; gap: 10px; color: var(--texto); font-size: 1rem; margin: 12px 0 0; }
 .partido input { width: 22px; height: 22px; min-height: 0; }
+
+/* ---- Hoja de un día y lista de cierres ---- */
+.hoja {
+  width: 100%; max-width: 640px; max-height: 80vh; overflow-y: auto;
+  background: var(--tarjeta); color: var(--texto); border-radius: 20px 20px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+}
+.hoja h2 { margin: 0 0 6px; text-transform: capitalize; }
+.lista-cierres { max-height: 220px; overflow-y: auto; margin: 6px 0; font-size: .9rem; color: var(--suave); }
+.lista-cierres li { padding: 3px 0; border-bottom: 1px solid var(--borde); }

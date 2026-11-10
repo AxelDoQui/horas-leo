@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { crearAlmacen, AJUSTES_POR_DEFECTO } from '../www/almacen.js';
+import { periodosCierre, periodoCierreDe, validarCierres } from '../www/calculo.js';
 
 function storageFalso() {
   const m = new Map();
@@ -140,4 +141,21 @@ test('JSON dañado: devuelve vacío pero guarda el texto original aparte', () =>
   const a = crearAlmacen(s);
   assert.deepEqual(a.listarTurnos(), []);
   assert.equal(s.getItem('horas.turnos.corrupto'), '{roto');
+});
+
+test('los cierres de nómina por defecto son válidos y reparten 2026 en periodos de 4 o 5 semanas', () => {
+  const c = AJUSTES_POR_DEFECTO.cierres;
+  assert.equal(validarCierres(c), '');
+  const p = periodosCierre(c);
+  assert.ok(p.every((x) => x.semanas === 4 || x.semanas === 5));
+  assert.equal(periodoCierreDe('2026-11-10', p).desde, '2026-10-26');
+  assert.equal(periodoCierreDe('2026-10-02', p).hasta, '2026-10-25');
+});
+
+test('unos ajustes guardados antes de existir los cierres reciben los de por defecto', () => {
+  const s = storageFalso();
+  s.setItem('horas.ajustes', JSON.stringify({ precioBase: 10 }));
+  const a = crearAlmacen(s).cargarAjustes();
+  assert.equal(a.precioBase, 10);
+  assert.deepEqual(a.cierres, AJUSTES_POR_DEFECTO.cierres);
 });

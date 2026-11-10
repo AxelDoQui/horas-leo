@@ -22,6 +22,13 @@ export const AJUSTES_POR_DEFECTO = {
     { desde: '2026-10-02', horas: 20 },
     { desde: '2026-10-19', horas: 25 },
   ],
+  // Inicio (lunes) de cada periodo de cierre de nóminas, del calendario «Horas complementarias,
+  // periodo cierre nóminas 2026» de la empresa. Cada periodo son 4 o 5 semanas enteras.
+  cierres: [
+    '2025-12-29', '2026-01-26', '2026-02-23', '2026-03-23', '2026-04-20', '2026-05-25',
+    '2026-06-22', '2026-07-20', '2026-08-24', '2026-09-21', '2026-10-26', '2026-11-23',
+    '2026-12-21',
+  ],
 };
 
 const nuevoId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

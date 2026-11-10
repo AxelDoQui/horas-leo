@@ -4,7 +4,7 @@ import {
   intervalo, calcularTurno, horasNocturnas, detallarTurnos,
   sumarDias, semanaDe, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
   estimarNomina, periodosDelMes, filtrarPeriodo, horasDelAnio, validarTurno,
-  cruzaMedianoche, tramosSolapan,
+  cruzaMedianoche, tramosSolapan, periodosCierre, periodoCierreDe, validarCierres,
 } from '../www/calculo.js';
 
 const turno = (ae, as, re, rs, fecha = '2026-10-05') => ({
@@ -311,4 +311,41 @@ test('tramosSolapan: turno partido correcto no solapa, el solapado sí', () => {
   assert.equal(tramosSolapan(a, b), false);
   assert.equal(tramosSolapan(a, { ...b, realEntrada: '12:00' }), true);
   assert.equal(tramosSolapan(a, { ...b, asignadoEntrada: '12:30' }), true);
+});
+
+const INICIOS = ['2026-11-23', '2026-09-21', '2026-10-26', '2026-10-26'];
+
+test('periodosCierre ordena, quita repetidos y cada periodo acaba el domingo antes del siguiente', () => {
+  const p = periodosCierre(INICIOS);
+  assert.deepEqual(p, [
+    { desde: '2026-09-21', hasta: '2026-10-25', semanas: 5 },
+    { desde: '2026-10-26', hasta: '2026-11-22', semanas: 4 },
+    { desde: '2026-11-23', hasta: '2026-12-20', semanas: 4 }, // el último se supone de 4 semanas
+  ]);
+});
+
+test('periodoCierreDe encuentra el periodo de una fecha, incluidos los bordes', () => {
+  const p = periodosCierre(INICIOS);
+  assert.equal(periodoCierreDe('2026-11-22', p).desde, '2026-10-26');
+  assert.equal(periodoCierreDe('2026-11-23', p).desde, '2026-11-23');
+  assert.equal(periodoCierreDe('2026-10-26', p).desde, '2026-10-26');
+  assert.equal(periodoCierreDe('2026-01-01', p), null);
+  assert.equal(periodoCierreDe('2026-12-21', p), null);
+});
+
+test('un periodo de cierre nunca parte una semana: las extra de la semana quedan enteras', () => {
+  const t = (fecha) => ({ fecha, asignadoEntrada: '09:00', asignadoSalida: '14:00', realEntrada: '09:00', realSalida: '14:00' });
+  const todos = ['2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23']; // 25 h hasta el domingo
+  const det = detallarTurnos(todos.map(t), 25);
+  assert.equal([...det.values()].reduce((a, x) => a + x.extra, 0), 0);
+  const p = periodosCierre(INICIOS);
+  assert.equal(semanaDe(p[1].desde).desde, p[1].desde); // empieza en lunes
+  assert.equal(semanaDe(p[1].hasta).hasta, p[1].hasta); // acaba en domingo
+});
+
+test('validarCierres pide fechas válidas y que sean lunes', () => {
+  assert.equal(validarCierres(INICIOS), '');
+  assert.match(validarCierres(['2026-10-27']), /lunes/);
+  assert.match(validarCierres(['mañana']), /fecha/);
+  assert.match(validarCierres([]), /al menos/);
 });

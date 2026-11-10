@@ -1,7 +1,7 @@
 import {
   calcularTurno, detallarTurnos, estimarNomina, filtrarPeriodo, periodosDelMes, horasDelAnio,
   validarTurno, semanaDe, sumarDias, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
-  cruzaMedianoche, tramosSolapan,
+  cruzaMedianoche, tramosSolapan, periodosCierre, periodoCierreDe, validarCierres,
 } from './calculo.js';
 import { crearAlmacen } from './almacen.js';
 import { pedirHora } from './selector-hora.js';
@@ -21,7 +21,9 @@ const estado = {
   anio: ahora.getFullYear(),
   mes: ahora.getMonth() + 1,
   ancla: hoyISO(), // una fecha cualquiera de la semana que se está viendo
-  periodo: 'mes', // 'mes' | 'q1' | 'q2' (solo en la vista Mes)
+  periodo: 'mes', // 'mes' | 'q1' | 'q2' (solo en la vista Mes, modo «natural»)
+  modoMes: 'cierre', // 'cierre' (periodos de nómina de la empresa) | 'natural' (mes del calendario)
+  cierreDesde: null, // inicio del periodo de cierre que se está viendo (null = el de `ancla`)
   editandoId: null,
   fechaNueva: null, // fecha con la que se abre un turno nuevo
   volverA: 'calendario', // pantalla a la que se vuelve al cerrar el formulario
@@ -197,7 +199,7 @@ function avisoCopia() {
 
 function vistaCalendario(el) {
   $('#titulo').textContent = 'Calendario';
-  const { todos, libres } = datos();
+  const { todos, libres, detalle } = datos();
   const porFecha = new Map();
   for (const t of todos) porFecha.set(t.fecha, (porFecha.get(t.fecha) || 0) + 1);
   const hoy = hoyISO();
@@ -242,9 +244,35 @@ function vistaCalendario(el) {
       }
       const delDia = todos.filter((t) => t.fecha === f);
       if (delDia.length === 0) abrirTurno({ fecha: f });
-      else if (delDia.length === 1) abrirTurno({ id: delDia[0].id });
-      else { estado.ancla = f; irA('semana'); } // varios turnos: se ven en la semana
+      else hojaDia(f, delDia, detalle); // el detalle de ese día, con todos sus tramos
     };
+  });
+}
+
+// Hoja con lo de un día: cada tramo con sus horas, el total, y para editar o añadir otro tramo.
+function hojaDia(fecha, turnos, detalle) {
+  const filas = turnos.map((t) => filaTurno(t, detalle.get(t), false)).join('');
+  const total = turnos.reduce((a, t) => a + detalle.get(t).trabajadas, 0);
+  const noche = turnos.reduce((a, t) => a + detalle.get(t).nocturnas, 0);
+  const fondo = document.createElement('div');
+  fondo.className = 'selector-fondo';
+  fondo.innerHTML = `
+    <div class="hoja" role="dialog" aria-modal="true" aria-label="${esc(etiquetaDia(fecha))}">
+      <h2>${esc(etiquetaDia(fecha))}</h2>
+      <ul>${filas}</ul>
+      <p class="resumen-turno">Total del día: <b>${horas(total)}</b>${noche > 0 ? ` · ${horas(noche)} nocturnas` : ''}</p>
+      <div class="acciones">
+        <button type="button" class="secundario" data-a="otro">+ Otro tramo</button>
+        <button type="button" class="secundario" data-a="cerrar">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.append(fondo);
+  fondo.addEventListener('click', (e) => {
+    const fila = e.target.closest('.fila');
+    const accion = e.target.dataset?.a;
+    if (fila) { fondo.remove(); abrirTurno({ id: fila.dataset.id }); }
+    else if (accion === 'otro') { fondo.remove(); abrirTurno({ fecha }); }
+    else if (accion === 'cerrar' || e.target === fondo) fondo.remove();
   });
 }
 
@@ -302,29 +330,72 @@ function vistaSemana(el) {
 
 // ---------- Mes ----------
 
+// «Cierre de noviembre» = el periodo que acaba en noviembre (así lo agrupa la empresa).
+function nombreCierre(per) {
+  const mes = fechaUTC(per.hasta).toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' });
+  return `Cierre de ${mes}`;
+}
+
 function vistaMes(el) {
   $('#titulo').textContent = 'Mes';
-  const per = periodosDelMes(estado.anio, estado.mes)[estado.periodo];
   const { todos, ajustes, detalle } = datos();
-  const turnos = filtrarPeriodo(todos, per.desde, per.hasta);
-  const est = estimarNomina(turnos, ajustes, todos);
-  const filas = turnos.map((t) => filaTurno(t, detalle.get(t))).join('');
-
-  el.innerHTML = `
-    ${cabeceraNav('mes-ant', nombreMes(), 'mes-sig', 'Mes anterior', 'Mes siguiente')}
+  const natural = estado.modoMes === 'natural';
+  const modos = `
     <div class="pestanas" style="margin-top:10px">
-      <button class="pestana ${estado.periodo === 'mes' ? 'activo' : ''}" data-p="mes">Mes</button>
-      <button class="pestana ${estado.periodo === 'q1' ? 'activo' : ''}" data-p="q1">1–15</button>
-      <button class="pestana ${estado.periodo === 'q2' ? 'activo' : ''}" data-p="q2">16–fin</button>
-    </div>
-    ${tarjetaHoras(est)}
-    ${tarjetaEstimacion(est, ajustes)}
-    <ul>${filas || '<li class="nota">No hay turnos en este periodo. Pulsa + para añadir uno.</li>'}</ul>`;
+      <button class="pestana ${natural ? '' : 'activo'}" data-m="cierre">Cierre de nómina</button>
+      <button class="pestana ${natural ? 'activo' : ''}" data-m="natural">Mes natural</button>
+    </div>`;
+  const cuerpo = (desde, hasta) => {
+    const turnos = filtrarPeriodo(todos, desde, hasta);
+    const est = estimarNomina(turnos, ajustes, todos);
+    const filas = turnos.map((t) => filaTurno(t, detalle.get(t))).join('');
+    return `${tarjetaHoras(est)}
+      ${tarjetaEstimacion(est, ajustes)}
+      <ul>${filas || '<li class="nota">No hay turnos en este periodo. Pulsa + para añadir uno.</li>'}</ul>`;
+  };
+  let periodos = [];
+  let actual = null;
 
-  el.querySelector('#mes-ant').onclick = () => cambiarMes(-1);
-  el.querySelector('#mes-sig').onclick = () => cambiarMes(1);
-  el.querySelectorAll('.pestana').forEach((b) => {
-    b.onclick = () => { estado.periodo = b.dataset.p; render(); };
+  if (natural) {
+    const per = periodosDelMes(estado.anio, estado.mes)[estado.periodo];
+    el.innerHTML = `
+      ${cabeceraNav('mes-ant', nombreMes(), 'mes-sig', 'Mes anterior', 'Mes siguiente')}
+      ${modos}
+      <div class="pestanas" style="margin-top:10px">
+        <button class="pestana ${estado.periodo === 'mes' ? 'activo' : ''}" data-p="mes">Mes</button>
+        <button class="pestana ${estado.periodo === 'q1' ? 'activo' : ''}" data-p="q1">1–15</button>
+        <button class="pestana ${estado.periodo === 'q2' ? 'activo' : ''}" data-p="q2">16–fin</button>
+      </div>
+      ${cuerpo(per.desde, per.hasta)}`;
+    el.querySelector('#mes-ant').onclick = () => cambiarMes(-1);
+    el.querySelector('#mes-sig').onclick = () => cambiarMes(1);
+    el.querySelectorAll('[data-p]').forEach((b) => {
+      b.onclick = () => { estado.periodo = b.dataset.p; render(); };
+    });
+  } else {
+    periodos = periodosCierre(ajustes.cierres);
+    actual = periodos.find((p) => p.desde === estado.cierreDesde) || periodoCierreDe(estado.ancla, periodos);
+    if (!actual) {
+      el.innerHTML = `${modos}
+        <div class="tarjeta"><p class="aviso">La fecha ${esc(etiquetaDia(estado.ancla))} no cae en ningún periodo de cierre.
+        Añade los periodos que falten en Ajustes → «Cierres de nómina».</p></div>`;
+    } else {
+      const i = periodos.indexOf(actual);
+      el.innerHTML = `
+        ${cabeceraNav('mes-ant', `${corto(actual.desde)} – ${corto(actual.hasta)}`, 'mes-sig', 'Periodo anterior', 'Periodo siguiente')}
+        <p class="nota" style="text-align:center;margin:0">${esc(nombreCierre(actual))} · ${actual.semanas} semanas (lunes a domingo)</p>
+        ${modos}
+        ${cuerpo(actual.desde, actual.hasta)}`;
+      el.querySelector('#mes-ant').onclick = () => {
+        if (i > 0) { estado.cierreDesde = periodos[i - 1].desde; render(); }
+      };
+      el.querySelector('#mes-sig').onclick = () => {
+        if (i < periodos.length - 1) { estado.cierreDesde = periodos[i + 1].desde; render(); }
+      };
+    }
+  }
+  el.querySelectorAll('[data-m]').forEach((b) => {
+    b.onclick = () => { estado.modoMes = b.dataset.m; render(); };
   });
   enlazarFilas(el);
 }
@@ -504,7 +575,7 @@ function vistaTurno(el) {
     if (avisos.length && !confirm(`${avisos.join('\n')}\n\n¿Guardar igualmente?`)) return;
     tramos.forEach((t) => almacen.guardarTurno(t));
     const [a, m] = fecha.split('-').map(Number);
-    estado.anio = a; estado.mes = m; estado.periodo = 'mes'; estado.ancla = fecha;
+    estado.anio = a; estado.mes = m; estado.periodo = 'mes'; estado.ancla = fecha; estado.cierreDesde = null;
     volver();
   };
 }
@@ -572,6 +643,18 @@ function vistaAjustes(el) {
       <div class="acciones"><button type="submit" class="primario">Guardar ajustes</button></div>
     </form>
     <div class="tarjeta">
+      <h2>Cierres de nómina</h2>
+      <p class="nota">Los periodos del calendario «Horas complementarias, periodo cierre nóminas» de la empresa: la vista Mes suma por ellos. Cuando publiquen el del año siguiente, añade los periodos que falten (se guarda al momento).</p>
+      <ul id="lista-cierres" class="lista-cierres"></ul>
+      <p class="nota">Para añadir el siguiente, pulsa lo que dura el último periodo:</p>
+      <div class="acciones">
+        <button type="button" class="secundario" id="c4">Dura 4 semanas</button>
+        <button type="button" class="secundario" id="c5">Dura 5 semanas</button>
+      </div>
+      <div class="acciones"><button type="button" class="peligro" id="cq">Quitar el último periodo</button></div>
+      <p class="error" id="msg-ci" role="alert"></p>
+    </div>
+    <div class="tarjeta">
       <h2>Copia de seguridad</h2>
       <p class="nota">Los datos solo están en este móvil. Copia el texto y guárdalo (por ejemplo en Notas o WhatsApp) para no perderlos.</p>
       <div class="acciones">
@@ -590,6 +673,35 @@ function vistaAjustes(el) {
     contenedor.insertAdjacentHTML('beforeend', filaJornada({ desde: hoyISO(), horas: 25 }));
   };
 
+  // Periodos de cierre: se guardan al momento (no esperan al botón de arriba).
+  const largo = (f) => fechaUTC(f).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  function pintarCierres() {
+    const per = periodosCierre(almacen.cargarAjustes().cierres);
+    el.querySelector('#lista-cierres').innerHTML = per.map((p, i) => `<li>${esc(largo(p.desde))} → ${i === per.length - 1
+      ? '<i>hasta que abras el siguiente</i>' : `${esc(largo(p.hasta))} · ${p.semanas} sem.`}</li>`).join('');
+  }
+  function cambiarCierres(inicios) {
+    const error = validarCierres(inicios);
+    if (error) { $('#msg-ci').textContent = error; return; }
+    almacen.guardarAjustes({ ...almacen.cargarAjustes(), cierres: inicios });
+    estado.cierreDesde = null;
+    $('#msg-ci').textContent = '';
+    pintarCierres();
+  }
+  pintarCierres();
+  const siguiente = (semanas) => {
+    const inicios = almacen.cargarAjustes().cierres;
+    const ultimo = periodosCierre(inicios).at(-1);
+    cambiarCierres([...inicios, sumarDias(ultimo.desde, semanas * 7)]);
+  };
+  el.querySelector('#c4').onclick = () => siguiente(4);
+  el.querySelector('#c5').onclick = () => siguiente(5);
+  el.querySelector('#cq').onclick = () => {
+    const inicios = almacen.cargarAjustes().cierres;
+    if (inicios.length <= 1) { $('#msg-ci').textContent = 'Tiene que quedar al menos un periodo.'; return; }
+    if (confirm('¿Quitar el último periodo de cierre?')) cambiarCierres(periodosCierre(inicios).slice(0, -1).map((p) => p.desde));
+  };
+
   el.querySelector('#form-aj').onsubmit = (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -605,7 +717,7 @@ function vistaAjustes(el) {
       if (!Number.isFinite(n) || n < 0) { $('#msg-aj').textContent = 'Revisa los números: tienen que ser cero o más.'; return; }
       nuevos[clave] = n;
     }
-    almacen.guardarAjustes(nuevos);
+    almacen.guardarAjustes({ ...almacen.cargarAjustes(), ...nuevos });
     $('#msg-aj').textContent = 'Guardado.';
   };
 

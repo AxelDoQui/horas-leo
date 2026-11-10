@@ -121,3 +121,17 @@ Android exige tocar «Instalar», así que no puede ser del todo automático. Si
 `gh release create vX.Y.Z Horas-Leo.apk --repo AxelDoQui/horas-leo`.
 El APK debe compilarse siempre en este PC (misma clave de depuración) o Android no lo dejará
 instalar encima.
+
+## Cierres de nómina y detalle del día (2026-11-10)
+
+- **Periodos de cierre.** La empresa cierra las horas complementarias por periodos de 4 o 5 semanas
+  enteras (lunes a domingo), según su calendario 2026. En `almacen.js` (`cierres`) se guardan solo
+  los lunes de inicio; cada periodo acaba el domingo antes del siguiente. El último se supone de
+  4 semanas hasta que se añada el siguiente (Ajustes → «Cierres de nómina», se guarda al momento).
+  La vista **Mes** suma por estos periodos («Cierre de noviembre» = el que acaba en noviembre);
+  «Mes natural» conserva el mes del calendario y sus quincenas. Al ser semanas enteras, las
+  horas extra de una semana nunca quedan partidas entre dos periodos.
+- **Detalle del día.** Tocar un día con turnos abre una hoja con sus tramos, el total y
+  «+ Otro tramo» (antes, con varios turnos saltaba a la Semana).
+- Los periodos se leyeron de una foto del calendario impreso: si alguna fecha no coincide con el
+  original, se corrige en Ajustes.

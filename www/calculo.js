@@ -260,3 +260,28 @@ export function tramosSolapan(a, b) {
     return y.ini < x.fin && x.ini < y.fin;
   });
 }
+
+// ---- Periodos de cierre de nómina (calendario de la empresa) ----
+// Se guardan solo las fechas de inicio (lunes). Cada periodo va hasta el domingo antes del
+// siguiente inicio, así que siempre son semanas enteras. El último no tiene siguiente: se
+// supone de 4 semanas (el calendario de la empresa solo da el año en curso).
+export function periodosCierre(inicios) {
+  const orden = [...new Set(inicios)].filter((f) => RE_FECHA.test(f)).sort();
+  return orden.map((desde, i) => {
+    const hasta = i + 1 < orden.length ? sumarDias(orden[i + 1], -1) : sumarDias(desde, 27);
+    return { desde, hasta, semanas: (diasEntre(desde, hasta) + 1) / 7 };
+  });
+}
+
+export function periodoCierreDe(fecha, periodos) {
+  return periodos.find((p) => fecha >= p.desde && fecha <= p.hasta) || null;
+}
+
+export function validarCierres(inicios) {
+  if (!inicios.length) return 'Tiene que haber al menos un periodo de cierre.';
+  for (const f of inicios) {
+    if (!RE_FECHA.test(f || '')) return `Hay una fecha de cierre que no es válida (${f || 'vacía'}).`;
+    if (semanaDe(f).desde !== f) return `El periodo que empieza el ${f} no empieza en lunes.`;
+  }
+  return '';
+}
