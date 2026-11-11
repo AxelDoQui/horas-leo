@@ -180,3 +180,5 @@ progress { width: 100%; height: 14px; }
 .hoja h2 { margin: 0 0 6px; text-transform: capitalize; }
 .lista-cierres { max-height: 220px; overflow-y: auto; margin: 6px 0; font-size: .9rem; color: var(--suave); }
 .lista-cierres li { padding: 3px 0; border-bottom: 1px solid var(--borde); }
+
+.dia b small { display: block; font-size: .6rem; font-weight: 500; color: var(--suave); line-height: 1; text-transform: capitalize; }

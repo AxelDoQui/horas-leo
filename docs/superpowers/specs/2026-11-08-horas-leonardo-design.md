@@ -135,3 +135,7 @@ instalar encima.
   «+ Otro tramo» (antes, con varios turnos saltaba a la Semana).
 - Los periodos se leyeron de una foto del calendario impreso: si alguna fecha no coincide con el
   original, se corrige en Ajustes.
+
+**1.3.0 (2026-11-11):** el Calendario también va por periodos de cierre (4 o 5 semanas, sin huecos),
+con el mes en el primer día de cada mes; Calendario y Mes comparten el periodo que se ve. Se
+quitó «Mes natural» y las quincenas.
