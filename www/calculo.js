@@ -113,6 +113,7 @@ export function validarJornadas(lista) {
   for (const j of lista) {
     if (!RE_FECHA.test(j.desde || '')) return 'Falta la fecha de una jornada.';
     if (!Number.isFinite(j.horas) || j.horas <= 0) return 'Las horas de cada jornada tienen que ser más de 0.';
+    if (j.precioDia !== undefined && (!Number.isFinite(j.precioDia) || j.precioDia < 0)) return 'El precio por día de cada jornada tiene que ser cero o más.';
     if (vistas.has(j.desde)) return 'Hay dos jornadas con la misma fecha.';
     vistas.add(j.desde);
   }
@@ -148,7 +149,30 @@ export function detallarTurnos(turnos, topes) {
 // `turnos` son los del periodo a estimar; `todos` son todos los que hay (para que el
 // tope semanal cuente también las horas de otras semanas o meses). Si no se pasa
 // `todos`, se usan solo `turnos`.
-export function estimarNomina(turnos, ajustes, todos = turnos) {
+// Salario base: se paga por DÍAS, no por horas (nómina de octubre: 17 d × 20,35 € y 13 d × 25,44 €).
+// El precio diario es el de la jornada vigente ese día; si la jornada no lo trae escrito, sale de
+// sus horas × 1,0175 (20 h → 20,35 €; 25 h → 25,44 €). Antes del primer contrato un día no suma.
+const EURO_DIA_POR_HORA_SEMANAL = 1.0175;
+export function precioDiaDe(fecha, jornadas) {
+  if (!Array.isArray(jornadas)) return 0;
+  const vigente = jornadas.filter((j) => j.desde <= fecha).sort((a, b) => a.desde.localeCompare(b.desde)).pop();
+  if (!vigente) return 0;
+  return vigente.precioDia ?? redondear(vigente.horas * EURO_DIA_POR_HORA_SEMANAL);
+}
+
+// Suma el precio diario de cada día del periodo (trabaje o no ese día).
+export function salarioBase(periodo, jornadas) {
+  let importe = 0;
+  let dias = 0;
+  const n = diasEntre(periodo.desde, periodo.hasta) + 1;
+  for (let i = 0; i < n; i++) {
+    const precio = precioDiaDe(sumarDias(periodo.desde, i), jornadas);
+    if (precio > 0) { importe += precio; dias += 1; }
+  }
+  return { importe: redondear(importe), dias };
+}
+
+export function estimarNomina(turnos, ajustes, todos = turnos, periodo = null) {
   const topes = ajustes.jornadas ?? ajustes.topeSemanal;
   const detalle = detallarTurnos(todos, topes);
   let asignadas = 0;
@@ -162,7 +186,7 @@ export function estimarNomina(turnos, ajustes, todos = turnos) {
     extra += c.extra;
     nocturnas += c.nocturnas;
   }
-  const base = ordinarias * ajustes.precioBase;
+  const { importe: base, dias: diasBase } = periodo ? salarioBase(periodo, ajustes.jornadas) : { importe: 0, dias: 0 };
   const pExtra = extra * ajustes.precioExtra;
   const pNocturna = nocturnas * ajustes.precioNocturna;
   const bruto = base + pExtra + pNocturna;
@@ -173,6 +197,7 @@ export function estimarNomina(turnos, ajustes, todos = turnos) {
     horasOrdinarias: redondear(ordinarias),
     horasExtra: redondear(extra),
     horasNocturnas: redondear(nocturnas),
+    diasBase,
     base: redondear(base),
     extra: redondear(pExtra),
     nocturnidad: redondear(pNocturna),

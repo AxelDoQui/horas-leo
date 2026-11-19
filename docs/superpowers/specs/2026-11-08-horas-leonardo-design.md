@@ -139,3 +139,12 @@ instalar encima.
 **1.3.0 (2026-11-11):** el Calendario también va por periodos de cierre (4 o 5 semanas, sin huecos),
 con el mes en el primer día de cada mes; Calendario y Mes comparten el periodo que se ve. Se
 quitó «Mes natural» y las quincenas.
+
+**1.4.0 (2026-11-19) — el salario base va por DÍAS, no por horas.** Corrección de Axel: en la nómina
+de octubre el base fueron 17 d × 20,35 € y 13 d × 25,44 € (días del calendario del contrato, no los
+trabajados; decidido: «todos los días del periodo»). Cada jornada lleva su `precioDia` (20,35 € con
+20 h, 25,44 € con 25 h; si falta, horas × 1,0175) y el salario base de un periodo (cierre o semana)
+suma el precio del día de cada día del periodo; antes del primer contrato un día no suma. Se
+eliminó el «precio por hora del base». Extra (9,54 €/h) y nocturnidad (0,48 €/h) siguen por hora.
+Ojo: la nómina real es mensual (30 días), así que un periodo de cierre de 28 días da un base
+menor que el de la nómina; es una estimación del periodo, no de la nómina.

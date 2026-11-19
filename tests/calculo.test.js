@@ -5,6 +5,7 @@ import {
   sumarDias, semanaDe, rejillaMes, topeDeFecha, validarJornadas, diasEntre,
   estimarNomina, periodosDelMes, filtrarPeriodo, horasDelAnio, validarTurno,
   cruzaMedianoche, tramosSolapan, periodosCierre, periodoCierreDe, validarCierres,
+  precioDiaDe, salarioBase,
 } from '../www/calculo.js';
 
 const turno = (ae, as, re, rs, fecha = '2026-10-05') => ({
@@ -198,7 +199,7 @@ test('validarJornadas: acepta una lista correcta y rechaza las malas', () => {
 // ---- Nómina ----
 
 const AJ = {
-  precioBase: 9.54, precioExtra: 9.54, precioNocturna: 0.48,
+  precioExtra: 9.54, precioNocturna: 0.48,
   descuentosPct: 6.5, irpfPct: 0, limiteAnual: 896, topeSemanal: 25,
 };
 
@@ -209,22 +210,21 @@ test('estimarNomina: 7 h trabajadas con 1 h nocturna, dentro del tope', () => {
   assert.equal(e.horasOrdinarias, 7);
   assert.equal(e.horasExtra, 0);
   assert.equal(e.horasNocturnas, 1);
-  assert.equal(e.base, 66.78);        // 7 × 9,54
+  assert.equal(e.base, 0);            // sin periodo no hay días de salario base
   assert.equal(e.extra, 0);
   assert.equal(e.nocturnidad, 0.48);  // 1 × 0,48
-  assert.equal(e.bruto, 67.26);
-  assert.equal(e.descuentos, 4.37);   // 6,5 % de 67,26 = 4,3719
+  assert.equal(e.bruto, 0.48);
+  assert.equal(e.descuentos, 0.03);   // 6,5 % de 0,48 = 0,0312
   assert.equal(e.irpf, 0);
-  assert.equal(e.liquido, 62.89);
+  assert.equal(e.liquido, 0.45);
 });
 
 test('estimarNomina: con tope de 5 h, 2 de las 7 h son extra', () => {
   const e = estimarNomina([turno('16:00', '20:00', '16:00', '23:00')], { ...AJ, topeSemanal: 5 });
   assert.equal(e.horasOrdinarias, 5);
   assert.equal(e.horasExtra, 2);
-  assert.equal(e.base, 47.7);   // 5 × 9,54
   assert.equal(e.extra, 19.08); // 2 × 9,54
-  assert.equal(e.bruto, 67.26);
+  assert.equal(e.bruto, 19.56); // + 1 h nocturna
 });
 
 test('estimarNomina: la semana se cuenta con todos los turnos, no solo los del periodo', () => {
@@ -244,7 +244,8 @@ test('estimarNomina: sin turnos todo es cero', () => {
 });
 
 test('estimarNomina: aplica el IRPF si se configura', () => {
-  const e = estimarNomina([turno('16:00', '20:00', '16:00', '20:00')], { ...AJ, irpfPct: 2 });
+  // Tope 0: las 4 h son extra (4 × 9,54 = 38,16).
+  const e = estimarNomina([turno('16:00', '20:00', '16:00', '20:00')], { ...AJ, topeSemanal: 0, irpfPct: 2 });
   assert.equal(e.bruto, 38.16);
   assert.equal(e.irpf, 0.76); // 2 % de 38,16 = 0,7632
 });
@@ -348,4 +349,33 @@ test('validarCierres pide fechas válidas y que sean lunes', () => {
   assert.match(validarCierres(['2026-10-27']), /lunes/);
   assert.match(validarCierres(['mañana']), /fecha/);
   assert.match(validarCierres([]), /al menos/);
+});
+
+test('precioDiaDe: precio del día según la jornada vigente, y 0 antes del contrato', () => {
+  assert.equal(precioDiaDe('2026-10-01', JORNADAS), 0);
+  assert.equal(precioDiaDe('2026-10-02', JORNADAS), 20.35); // 20 h × 1,0175, como la nómina
+  assert.equal(precioDiaDe('2026-10-18', JORNADAS), 20.35);
+  assert.equal(precioDiaDe('2026-10-19', JORNADAS), 25.44);
+  const propio = [{ desde: '2026-10-02', horas: 20, precioDia: 22 }];
+  assert.equal(precioDiaDe('2026-11-01', propio), 22); // si se escribe el precio, manda ese
+});
+
+test('salarioBase de octubre = 17 días × 20,35 + 13 días × 25,44, como la nómina real', () => {
+  const b = salarioBase({ desde: '2026-10-01', hasta: '2026-10-31' }, JORNADAS);
+  assert.deepEqual(b, { importe: 676.67, dias: 30 }); // el 1 de octubre aún no había contrato
+});
+
+test('estimarNomina: el salario base va por días del periodo, trabaje o no, no por horas', () => {
+  const e = estimarNomina([], { ...AJ, jornadas: JORNADAS }, [], { desde: '2026-10-01', hasta: '2026-10-31' });
+  assert.equal(e.base, 676.67);
+  assert.equal(e.diasBase, 30);
+  assert.equal(e.bruto, 676.67);
+  assert.equal(e.descuentos, 43.98);
+  assert.equal(e.liquido, 632.69);
+});
+
+test('estimarNomina: un periodo de cierre de 4 semanas con 25 h cuenta 28 días de 25,44 €', () => {
+  const e = estimarNomina([], { ...AJ, jornadas: JORNADAS }, [], { desde: '2026-10-26', hasta: '2026-11-22' });
+  assert.equal(e.diasBase, 28);
+  assert.equal(e.base, 712.32);
 });

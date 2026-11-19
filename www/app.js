@@ -1,6 +1,6 @@
 import {
   calcularTurno, detallarTurnos, estimarNomina, filtrarPeriodo, horasDelAnio,
-  validarTurno, semanaDe, sumarDias, topeDeFecha, validarJornadas, diasEntre,
+  validarTurno, precioDiaDe, semanaDe, sumarDias, topeDeFecha, validarJornadas, diasEntre,
   cruzaMedianoche, tramosSolapan, periodosCierre, periodoCierreDe, validarCierres,
 } from './calculo.js';
 import { crearAlmacen } from './almacen.js';
@@ -172,14 +172,11 @@ function tarjetaHoras(est) {
   </div>`;
 }
 
-function tarjetaEstimacion(est, ajustes) {
-  const avisoPrecio = ajustes.precioBase === 0
-    ? '<p class="aviso">El precio por hora de la base está a 0 en Ajustes: la estimación no cuenta el salario base.</p>'
-    : '';
+function tarjetaEstimacion(est) {
   return `<div class="tarjeta">
     <h2>Estimación de nómina</h2>
     <table class="tabla">
-      <tr><td>Salario base</td><td>${euros(est.base)}</td></tr>
+      <tr><td>Salario base (${est.diasBase} días)</td><td>${euros(est.base)}</td></tr>
       <tr><td>Horas extra</td><td>${euros(est.extra)}</td></tr>
       <tr><td>Nocturnidad</td><td>${euros(est.nocturnidad)}</td></tr>
       <tr class="total"><td>Bruto</td><td>${euros(est.bruto)}</td></tr>
@@ -187,8 +184,7 @@ function tarjetaEstimacion(est, ajustes) {
       <tr><td>IRPF</td><td>${resta(est.irpf)}</td></tr>
       <tr class="total"><td>Líquido aprox.</td><td>${euros(est.liquido)}</td></tr>
     </table>
-    ${avisoPrecio}
-    <p class="nota">Es una estimación: la nómina real paga el salario base por días y redondea los precios.</p>
+    <p class="nota">Es una estimación: el salario base cuenta todos los días del periodo (trabajes o no) con el precio diario de tu contrato; las extra y la nocturnidad, por hora.</p>
   </div>`;
 }
 
@@ -308,7 +304,7 @@ function vistaSemana(el) {
   const { todos, libres, ajustes, detalle } = datos();
   const sem = semanaDe(estado.ancla);
   const turnos = filtrarPeriodo(todos, sem.desde, sem.hasta);
-  const est = estimarNomina(turnos, ajustes, todos);
+  const est = estimarNomina(turnos, ajustes, todos, sem);
   const trabajadas = redondear(est.horasOrdinarias + est.horasExtra);
   const tope = topeDeFecha(sem.desde, ajustes.jornadas);
   const hoy = hoyISO();
@@ -342,7 +338,7 @@ function vistaSemana(el) {
       ${pasaDelTope}
     </div>
     ${tarjetaHoras(est)}
-    ${tarjetaEstimacion(est, ajustes)}
+    ${tarjetaEstimacion(est)}
     ${dias.join('')}`;
 
   el.querySelector('#sem-ant').onclick = () => { estado.ancla = sumarDias(sem.desde, -7); render(); };
@@ -361,12 +357,12 @@ function vistaMes(el) {
   const { periodos, actual } = periodoVisto(ajustes);
   if (!actual) { el.innerHTML = AVISO_SIN_PERIODO(); return; }
   const turnos = filtrarPeriodo(todos, actual.desde, actual.hasta);
-  const est = estimarNomina(turnos, ajustes, todos);
+  const est = estimarNomina(turnos, ajustes, todos, actual);
   const filas = turnos.map((t) => filaTurno(t, detalle.get(t))).join('');
   el.innerHTML = `
     ${cabeceraCierre(actual)}
     ${tarjetaHoras(est)}
-    ${tarjetaEstimacion(est, ajustes)}
+    ${tarjetaEstimacion(est)}
     <ul>${filas || '<li class="nota">No hay turnos en este periodo. Pulsa + para añadir uno.</li>'}</ul>`;
   navegarCierre(el, periodos, actual);
   enlazarFilas(el);
@@ -579,7 +575,6 @@ function vistaAnual(el) {
 // ---------- Ajustes ----------
 
 const CAMPOS_AJUSTES = [
-  ['precioBase', 'Precio por hora (salario base, €)'],
   ['precioExtra', 'Precio hora extra / complementaria (€)'],
   ['precioNocturna', 'Plus por hora nocturna (€)'],
   ['descuentosPct', 'Descuentos de Seguridad Social (%)'],
@@ -587,10 +582,15 @@ const CAMPOS_AJUSTES = [
   ['limiteAnual', 'Límite anual de horas'],
 ];
 
+// Precio por día de una jornada: el escrito, o el que sale de sus horas (como en el cálculo).
+const precioDiaFila = (j) => j.precioDia ?? precioDiaDe(j.desde, [j]);
+
 function filaJornada(j) {
   return `<div class="rejilla jornada">
     <label>Desde <input type="date" name="jdesde" value="${esc(j.desde)}"></label>
     <label>Horas por semana <input type="number" name="jhoras" step="0.5" min="0" inputmode="decimal" value="${esc(j.horas)}"></label>
+    <label style="grid-column:1/-1">Salario base por día (€)
+      <input type="number" name="jprecio" step="0.01" min="0" inputmode="decimal" value="${esc(precioDiaFila(j))}"></label>
     <button type="button" class="peligro quitar-j" style="grid-column:1/-1">Quitar</button>
   </div>`;
 }
@@ -610,7 +610,7 @@ function vistaAjustes(el) {
       <p class="nota">Horas ordinarias por semana (lunes a domingo). Lo que pasa de ahí cuenta como extra. Cada semana usa la jornada vigente el lunes. Añade una fila cuando cambie el contrato.</p>
       <div id="jornadas">${ajustes.jornadas.map(filaJornada).join('')}</div>
       <div class="acciones"><button type="button" class="secundario" id="mas-jornada">+ Añadir cambio de jornada</button></div>
-      <p class="nota">Valores de la nómina de octubre de 2026. El precio por hora del salario base no sale de la nómina (se paga por días): empieza igual que la hora extra y se puede cambiar.</p>
+      <p class="nota">Valores de la nómina de octubre de 2026. El salario base se paga por días del calendario (en octubre: 17 d × 20,35 € y 13 d × 25,44 €), no por horas: cada jornada lleva su precio por día.</p>
       <p class="error" id="msg-aj" role="alert"></p>
       <div class="acciones"><button type="submit" class="primario">Guardar ajustes</button></div>
     </form>
@@ -642,7 +642,7 @@ function vistaAjustes(el) {
     if (e.target.classList.contains('quitar-j')) e.target.closest('.jornada').remove();
   });
   el.querySelector('#mas-jornada').onclick = () => {
-    contenedor.insertAdjacentHTML('beforeend', filaJornada({ desde: hoyISO(), horas: 25 }));
+    contenedor.insertAdjacentHTML('beforeend', filaJornada({ desde: hoyISO(), horas: 25, precioDia: 25.44 }));
   };
 
   // Periodos de cierre: se guardan al momento (no esperan al botón de arriba).
@@ -680,6 +680,7 @@ function vistaAjustes(el) {
     const jornadas = [...contenedor.querySelectorAll('.jornada')].map((fila) => ({
       desde: fila.querySelector('[name=jdesde]').value,
       horas: Number(fila.querySelector('[name=jhoras]').value),
+      precioDia: Number(fila.querySelector('[name=jprecio]').value),
     }));
     const errorJornadas = validarJornadas(jornadas);
     if (errorJornadas) { $('#msg-aj').textContent = errorJornadas; return; }

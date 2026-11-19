@@ -51,21 +51,21 @@ test('borrarTurno quita solo ese turno', () => {
 test('cargarAjustes devuelve los de por defecto y guarda los cambios', () => {
   const a = crearAlmacen(storageFalso());
   assert.deepEqual(a.cargarAjustes(), AJUSTES_POR_DEFECTO);
-  a.guardarAjustes({ ...AJUSTES_POR_DEFECTO, precioBase: 10.5 });
-  assert.equal(a.cargarAjustes().precioBase, 10.5);
+  a.guardarAjustes({ ...AJUSTES_POR_DEFECTO, precioExtra: 10.5 });
+  assert.equal(a.cargarAjustes().precioExtra, 10.5);
   assert.equal(a.cargarAjustes().limiteAnual, 1120);
 });
 
 test('exportar e importar en otro almacén conserva turnos y ajustes', () => {
   const a = crearAlmacen(storageFalso());
   a.guardarTurno(turno('2026-10-05'));
-  a.guardarAjustes({ ...AJUSTES_POR_DEFECTO, precioBase: 11 });
+  a.guardarAjustes({ ...AJUSTES_POR_DEFECTO, precioExtra: 11 });
   const texto = a.exportar();
 
   const b = crearAlmacen(storageFalso());
   assert.equal(b.importar(texto), 1);
   assert.equal(b.listarTurnos().length, 1);
-  assert.equal(b.cargarAjustes().precioBase, 11);
+  assert.equal(b.cargarAjustes().precioExtra, 11);
 });
 
 test('importar un texto que no es una copia lanza error y no cambia nada', () => {
@@ -154,8 +154,8 @@ test('los cierres de nómina por defecto son válidos y reparten 2026 en periodo
 
 test('unos ajustes guardados antes de existir los cierres reciben los de por defecto', () => {
   const s = storageFalso();
-  s.setItem('horas.ajustes', JSON.stringify({ precioBase: 10 }));
+  s.setItem('horas.ajustes', JSON.stringify({ precioExtra: 10 }));
   const a = crearAlmacen(s).cargarAjustes();
-  assert.equal(a.precioBase, 10);
+  assert.equal(a.precioExtra, 10);
   assert.deepEqual(a.cierres, AJUSTES_POR_DEFECTO.cierres);
 });

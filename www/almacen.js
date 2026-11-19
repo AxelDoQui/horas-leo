@@ -9,7 +9,6 @@ const CLAVE_COPIA = 'horas.ultimaCopia'; // fecha de la última copia de segurid
 const RE_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 export const AJUSTES_POR_DEFECTO = {
-  precioBase: 9.54,
   precioExtra: 9.54,
   precioNocturna: 0.48,
   descuentosPct: 6.5,
@@ -18,9 +17,10 @@ export const AJUSTES_POR_DEFECTO = {
   limiteAnual: 1120,
   // Horas semanales ordinarias: 20 h desde el inicio del contrato (02/10/2026) y 25 h desde
   // el 19/10/2026 (variación de jornada firmada el 16/10/2026). Lo que pasa del tope es extra.
+  // `precioDia`: salario base por día (se paga por días, no por horas): 20,35 € con 20 h y 25,44 € con 25 h.
   jornadas: [
-    { desde: '2026-10-02', horas: 20 },
-    { desde: '2026-10-19', horas: 25 },
+    { desde: '2026-10-02', horas: 20, precioDia: 20.35 },
+    { desde: '2026-10-19', horas: 25, precioDia: 25.44 },
   ],
   // Inicio (lunes) de cada periodo de cierre de nóminas, del calendario «Horas complementarias,
   // periodo cierre nóminas 2026» de la empresa. Cada periodo son 4 o 5 semanas enteras.
